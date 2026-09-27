@@ -143,8 +143,11 @@ extern time_t start_time;
 extern time_t end_time;
 
 //modbus.cpp
+#define MB_WRITE_ALLOWLIST_FILE "mbwrite_allow.list"
 int readModbusMessage(int fd, unsigned char *buffer, size_t bufferSize);
-int processModbusMessage(unsigned char *buffer, int bufferSize);
+int processModbusMessage(unsigned char *buffer, int bufferSize, uint32_t peer_addr);
+int loadModbusWriteAllowlist(const char *path);
+bool modbusWriteAllowed(uint32_t peer_addr);
 void mapUnusedIO();
 
 //enip.cpp

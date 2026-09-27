@@ -132,13 +132,15 @@ int createSocket(uint16_t port)
 // Blocking call. Wait here for the client to connect. Returns the file
 // descriptor to communicate with the client.
 //-----------------------------------------------------------------------------
-int waitForClient(int socket_fd, int protocol_type)
+int waitForClient(int socket_fd, int protocol_type, struct sockaddr_in *client_addr_out)
 {
     char log_msg[1000];
     int client_fd;
     struct sockaddr_in client_addr;
     bool *run_server;
     socklen_t client_len;
+
+    bzero((char *) &client_addr, sizeof(client_addr));
 
     if (protocol_type == MODBUS_PROTOCOL)
         run_server = &run_modbus;
@@ -160,6 +162,10 @@ int waitForClient(int socket_fd, int protocol_type)
         sleepms(100);
     }
 
+    if (client_addr_out != NULL)
+    {
+        *client_addr_out = client_addr;
+    }
     return client_fd;
 }
 
@@ -178,12 +184,12 @@ int listenToClient(int client_fd, unsigned char *buffer)
 //-----------------------------------------------------------------------------
 // Process client's request
 //-----------------------------------------------------------------------------
-void processMessage(unsigned char *buffer, int bufferSize, int client_fd, int protocol_type)
+void processMessage(unsigned char *buffer, int bufferSize, int client_fd, int protocol_type, uint32_t peer_addr)
 {
     int messageSize = 0;
     if (protocol_type == MODBUS_PROTOCOL)
     {
-        messageSize = processModbusMessage(buffer, bufferSize);
+        messageSize = processModbusMessage(buffer, bufferSize, peer_addr);
     }
     else if (protocol_type == ENIP_PROTOCOL)
     {
@@ -213,6 +219,7 @@ void *handleConnections(void *arguments)
     int *args = (int *)arguments;
     int client_fd = args[0];
     int protocol_type = args[1];
+    uint32_t peer_addr = (uint32_t)args[2];
     unsigned char buffer[NET_BUFFER_SIZE];
     int messageSize;
     bool *run_server;
@@ -254,7 +261,7 @@ void *handleConnections(void *arguments)
             break;
         }
 
-        processMessage(buffer, messageSize, client_fd, protocol_type);
+        processMessage(buffer, messageSize, client_fd, protocol_type, peer_addr);
     }
     //printf("Debug: Closing client socket and calling pthread_exit in server.cpp\n");
     close(client_fd);
@@ -272,6 +279,7 @@ void startServer(uint16_t port, int protocol_type)
 {
     char log_msg[1000];
     int socket_fd, client_fd;
+    struct sockaddr_in client_addr;
     bool *run_server;
     
     socket_fd = createSocket(port);
@@ -279,6 +287,7 @@ void startServer(uint16_t port, int protocol_type)
     if (protocol_type == MODBUS_PROTOCOL)
     {
         //mapUnusedIO();
+        loadModbusWriteAllowlist(MB_WRITE_ALLOWLIST_FILE);
         run_server = &run_modbus;
     }
     else if (protocol_type == ENIP_PROTOCOL)
@@ -286,7 +295,7 @@ void startServer(uint16_t port, int protocol_type)
     
     while(*run_server)
     {
-        client_fd = waitForClient(socket_fd, protocol_type); //block until a client connects
+        client_fd = waitForClient(socket_fd, protocol_type, &client_addr); //block until a client connects
         if (client_fd < 0)
         {
             sprintf(log_msg, "Server: Error accepting client!\n");
@@ -295,13 +304,14 @@ void startServer(uint16_t port, int protocol_type)
 
         else
         {
-            int arguments[2];
+            int arguments[3];
             pthread_t thread;
             int ret = -1;
             sprintf(log_msg, "Server: Client accepted! Creating thread for the new client ID: %d...\n", client_fd);
             openplc_log(log_msg);
             arguments[0] = client_fd;
             arguments[1] = protocol_type;
+            arguments[2] = (int)client_addr.sin_addr.s_addr;
             ret = pthread_create(&thread, NULL, handleConnections, (void*)arguments);
             if (ret==0) 
             {
