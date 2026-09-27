@@ -1,0 +1,42 @@
+Tag,Address,Type,Signal,Device,Panel Terminal,Description,Fail State / Note,Modbus (slave addr)
+ESTOP_OK,%IX0.0,BOOL,DI 24VDC,K1 Pilz PNOZ s3 output 13/14,TB1-1,E-stop circuit healthy (both channels),0 = tripped or wire break,DI 0
+GUARD_CLOSED,%IX0.1,BOOL,DI 24VDC,ZS-431 Schmersal AZ 16 tongue switch,TB1-2,Chamber door closed,0 = open or wire break,DI 1
+PB_RESET,%IX0.2,BOOL,DI 24VDC,HS-432 blue illuminated PB (NO),TB1-3,Alarm acknowledge / machine reset,momentary,DI 2
+PB_START,%IX0.3,BOOL,DI 24VDC,HS-433 green PB (NO),TB1-4,Cycle start,momentary,DI 3
+PB_STOP_NC,%IX0.4,BOOL,DI 24VDC,HS-434 red PB (NC),TB1-5,Cycle stop (controlled stop),0 = pressed or wire break,DI 4
+SEL_AUTO,%IX0.5,BOOL,DI 24VDC,HS-435 2-pos maintained selector,TB1-6,1 = AUTO 0 = MANUAL,MANUAL holds any running cycle,DI 5
+PE_INFEED,%IX0.6,BOOL,DI PNP,ZE-436 Banner Q4X retroreflective,TB1-7,Part staged at infeed conveyor,1 = part present,DI 6
+PE_CHAMBER,%IX0.7,BOOL,DI PNP,ZE-437 Banner Q45 thru-beam,TB1-8,Part in spray chamber (stop position),1 = beam broken,DI 7
+PE_OUTFEED,%IX1.0,BOOL,DI PNP,ZE-438 Banner Q4X retroreflective,TB1-9,Part at outfeed / downstream station full,1 = blocked,DI 8
+LSL_TANK,%IX1.1,BOOL,DI 24VDC,LSL-441 Gems LS-7 float (NO rising),TB1-10,Tank level above LOW (heater dry-fire interlock),0 = LOW or wire break (fail safe),DI 9
+LSH_TANK,%IX1.2,BOOL,DI 24VDC,LSH-442 Gems LS-7 float (NO rising),TB1-11,Tank level above HIGH,1 = high,DI 10
+PUMP_AUX,%IX1.3,BOOL,DI 24VDC,M2 contactor aux NO,TB1-12,Wash pump running feedback,1 = contactor closed,DI 11
+INFEED_VFD_RDY,%IX1.4,BOOL,DI 24VDC,VFD-1 PowerFlex 525 relay R1 (Ready),TB1-13,Infeed conveyor drive ready / no fault,0 = faulted,DI 12
+PUMP_OL_OK,%IX1.5,BOOL,DI 24VDC,OL2 E1 Plus overload aux (NC),TB1-14,Pump overload healthy,0 = tripped,DI 13
+HTR_OK,%IX1.6,BOOL,DI 24VDC,HTR-1..3 high-limit thermostats in series,TB1-15,Heater high-limit chain closed,0 = any element over-temp (manual reset at element),DI 14
+TANK_TEMP_RAW,%IW0,INT,AI 4-20mA,TT-443 Pt100 + Rosemount 248 xmtr,TB2-1/2,Wash tank temperature 0..100 degC,0..27648 counts; <-1382 or >29030 = xmtr fault,IR 0
+TANK_LEVEL_RAW,%IW1,INT,AI 4-20mA,LT-444 Endress+Hauser Deltapilot hydrostatic,TB2-3/4,Wash tank level 0..100 %,0..27648 counts; fault as above,IR 1
+PUMP_PRESS_RAW,%IW2,INT,AI 4-20mA,PT-445 IFM PT5400 spray header,TB2-5/6,Spray header pressure 0..10 bar,0..27648 counts; fault as above,IR 2
+INFEED_RUN,%QX0.0,BOOL,DO 24VDC,VFD-1 DigIn 1 (Run Fwd),TB3-1,Infeed conveyor run,drops on any abort,Coil 0
+PUMP_RUN,%QX0.1,BOOL,DO 24VDC,M2 contactor coil via K1 safety contacts,TB3-2,Wash pump (7.5 kW) run,also hard-wired through K1,Coil 1
+HEATER_ON,%QX0.2,BOOL,DO 24VDC,K3 contactor coil (3x 18 kW elements),TB3-3,Immersion heaters enable,never without LSL_TANK; hard-wired through HTR chain,Coil 2
+FILL_VALVE,%QX0.3,BOOL,DO 24VDC,SOV-446 ASCO 8210 NC,TB3-4,Fresh water make-up valve,closed on power loss,Coil 3
+DOOR_LOCK,%QX0.4,BOOL,DO 24VDC,SOL-447 door lock solenoid,TB3-5,Chamber door lock while spraying,unlocked on power loss,Coil 4
+STACK_RED,%QX0.5,BOOL,DO 24VDC,Werma 640 stack light red,TB3-6,Aborted / critical alarm,,Coil 5
+STACK_AMBER,%QX0.6,BOOL,DO 24VDC,Werma 640 stack light amber,TB3-7,Held / warning,,Coil 6
+STACK_GREEN,%QX0.7,BOOL,DO 24VDC,Werma 640 stack light green,TB3-8,In cycle (steady) / idle ready (flash 1 Hz),,Coil 7
+HORN,%QX1.0,BOOL,DO 24VDC,Werma 640 buzzer element,TB3-9,New critical alarm; 30 s max; RESET silences,,Coil 8
+HMI_STATE,%QW0,INT,register,Ignition tag [PW430]/State,-,PackML state number (1..17),,HR 0
+HMI_STEP,%QW1,INT,register,Ignition tag [PW430]/Step,-,Wash sequence step 0/10/20/30/40,,HR 1
+HMI_ALARMS,%QW2,INT,register,Ignition tag [PW430]/AlarmWord,-,Alarm bitmask (see Alarm-List),,HR 2
+HMI_TANK_TEMP,%QW3,INT,register,Ignition tag [PW430]/TankTemp,-,Tank temperature degC x10,,HR 3
+HMI_TANK_LEVEL,%QW4,INT,register,Ignition tag [PW430]/TankLevel,-,Tank level % x10,,HR 4
+HMI_PUMP_PRESS,%QW5,INT,register,Ignition tag [PW430]/SprayPress,-,Spray header pressure bar x100,,HR 5
+HMI_CYCLE_COUNT,%QW6,INT,register,Ignition tag [PW430]/CycleCount -> MES shift count,-,Parts washed since reset,wraps at 32767,HR 6
+HMI_WASH_REMAIN,%QW7,INT,register,Ignition tag [PW430]/WashRemain,-,Seconds remaining in spray step,,HR 7
+SP_TEMP_X10,%MW0,INT,setpoint,HMI Setpoints screen (supervisor),-,Wash temperature setpoint degC x10,default 550,HR 1024
+SP_TEMP_HYST_X10,%MW1,INT,setpoint,HMI Setpoints screen (supervisor),-,Heater hysteresis degC x10,default 20; clamped >= 5,HR 1025
+SP_WASH_TIME_S,%MW2,INT,setpoint,HMI Setpoints screen (supervisor),-,Spray time per part s,default 90,HR 1026
+SP_JAM_TIME_S,%MW3,INT,setpoint,HMI Setpoints screen (supervisor),-,Conveyor jam timeout s,default 8,HR 1027
+SP_FILL_PCT_X10,%MW4,INT,setpoint,HMI Setpoints screen (supervisor),-,Make-up water on below % x10 (off at +5 %),default 650,HR 1028
+SP_BLOCKED_WARN_S,%MW5,INT,setpoint,HMI Setpoints screen (supervisor),-,Downstream blocked warning delay s,default 60,HR 1029

@@ -1,0 +1,15 @@
+Bit,Value,Alarm Tag,HMI Text,Priority (ISA-18.2),Trigger,Latched,Machine Response,Operator Action,Clears
+0,1,A_ESTOP,E-STOP ACTIVE,Critical,ESTOP_OK = 0,No (follows input),ABORT: all outputs off; horn 30 s,Locate pulled E-stop and reset it at the station; press RESET twice (clear then reset),ESTOP_OK = 1 and RESET
+1,2,A_GUARD_OPEN,CHAMBER DOOR OPEN IN CYCLE,Critical,GUARD_CLOSED = 0 while EXECUTE,Yes,HOLD: pump and conveyor stop; door lock released after pump proven stopped,Close door; RESET; START,RESET with door closed
+2,4,A_TANK_LOW,WASH TANK LEVEL LOW - HEATERS LOCKED OUT,Critical,LSL_TANK = 0,Yes,Heaters off; fill valve opens; cycle HOLD,Confirm make-up water is flowing; check for tank leak; RESET when LSL made,RESET with LSL_TANK = 1
+3,8,A_TANK_HIGH,WASH TANK LEVEL HIGH,Critical,LSH_TANK = 1,No,Fill valve closed; cycle HOLD,Check SOV-446 for stuck open; check LT-444 vs sight glass,LSH_TANK = 0
+4,16,A_TEMP_LOW,WASH TEMP BELOW SPEC,Warning,TANK_TEMP < SP - 2 x hysteresis while EXECUTE,No,None (quality warning; amber),Verify heaters running (K3); allow warm-up; check element continuity,Temp recovers or leave EXECUTE
+5,32,A_TEMP_HIGH,WASH TEMP HIGH,Critical,TANK_TEMP > SP + 10 degC,No,Heaters off; cycle HOLD,Check K3 contactor for welded contacts; verify TT-443,Temp < SP + 10
+6,64,A_JAM,INFEED CONVEYOR JAM,Critical,Indexing (step 20) and PE_CHAMBER not made within SP_JAM_TIME_S,Yes,HOLD: conveyor stops,Clear part; check ZE-437 alignment; RESET; START,RESET
+7,128,A_PUMP_FTS,WASH PUMP FAIL TO START/STOP,Critical,PUMP_RUN <> PUMP_AUX for > 3 s,Yes (in FB_MOTOR),HOLD: pump command removed,Check M2 contactor and aux contact; check OL2,RESET (FB_MOTOR reset in RESETTING)
+8,256,A_PUMP_OL,WASH PUMP OVERLOAD,Critical,PUMP_OL_OK = 0,Yes (in FB_MOTOR),HOLD: pump command removed,Reset OL2 at panel after cool-down; check impeller for debris,OL2 reset then RESET
+9,512,A_VFD_FAULT,INFEED DRIVE FAULT,Critical,INFEED_VFD_RDY = 0,No,HOLD: conveyor stops,Read fault code on VFD-1 keypad; clear at drive,VFD ready
+10,1024,A_LT_FAIL,LEVEL TRANSMITTER FAULT,Critical,LT-444 loop < 3.5 mA or > 20.5 mA,No,Fill valve closed; level held at last good; cycle HOLD,Check LT-444 wiring TB2-3/4; instrument tech,Loop in range
+11,2048,A_TT_FAIL,TEMP TRANSMITTER FAULT,Critical,TT-443 loop < 3.5 mA or > 20.5 mA,No,Heaters off; temp held at last good; cycle HOLD,Check TT-443 / RTD wiring TB2-1/2; instrument tech,Loop in range
+12,4096,A_BLOCKED,OUTFEED BLOCKED,Warning,Step 40 and PE_OUTFEED made for > SP_BLOCKED_WARN_S,No,None (part waits; amber),Check downstream station (Cell 4-40 deburr) status,PE_OUTFEED clears
+13,8192,A_HTR_HILIMIT,HEATER HIGH-LIMIT TRIPPED,Critical,HTR_OK = 0,Yes,Heaters off; cycle HOLD,Let element cool; press manual reset on tripped thermostat; RESET,RESET with HTR_OK = 1

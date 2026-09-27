@@ -4,6 +4,11 @@
 > It has been replaced by [OpenPLC Runtime v4](https://github.com/autonomy-logic/openplc-runtime).
 > Please visit the new repository for installation instructions, documentation, and support.
 
+> **Talon Power Systems fork.** This fork carries the Kingsport Engine Plant Line 4 controls
+> assets under [`talon/`](talon/README.md): the PW-430 washer program (IEC 61131-3 ST), its
+> FDS / IO list / alarm list, a SIL harness and HIL plant model, and the OT security review
+> scope. The runtime itself is unmodified upstream OpenPLC v3 (GPLv3).
+
 ---
 
 [![Build Status](https://travis-ci.org/thiagoralves/OpenPLC_v3.svg?branch=master)](https://travis-ci.org/thiagoralves/OpenPLC_v3)
