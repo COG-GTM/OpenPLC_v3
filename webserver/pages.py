@@ -140,6 +140,25 @@ login_body = """
     </body>
 </html>"""
 
+change_password_head = login_head.replace("<form action='login' method='POST' class='login-form'>", "<form action='change-password' method='POST' class='login-form'>")
+
+change_password_body = """
+                    <h3 style=\"font-family:'Roboto', sans-serif; font-size:14px; color:#1F1F1F; padding:0px 0px 0px 0px; margin: 0px 0px 40px 0px\"><center>The default password must be changed before you can continue</center></h3>
+                    <input type='password' name='current_password' id='current_password' placeholder='current password'/>
+                    <input type='password' name='new_password' id='new_password' placeholder='new password'/>
+                    <input type='password' name='confirm_password' id='confirm_password' placeholder='confirm new password'/>
+                    <br><br><br>
+                    <button>change password</button>
+                </form>
+              </div>
+            </div>
+        </div>
+    </body>
+</html>"""
+
+def change_password_error(message):
+    return change_password_body.replace("color:#1F1F1F", "color:red; font-weight: bold", 1).replace("The default password must be changed before you can continue", str(message).replace('<', '&lt;').replace('>', '&gt;'), 1)
+
 bad_login_body = """
                     <h3 style=\"font-family:'Roboto', sans-serif; font-size:14px; color:red; font-weight: bold; padding:0px 0px 0px 0px; margin: 0px 0px 40px 0px\"><center>Bad credentials! Try again</center></h3>
                     <input type='text' name='username' id='username' placeholder='username'/>
