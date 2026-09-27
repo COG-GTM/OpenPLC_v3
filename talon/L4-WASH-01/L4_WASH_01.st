@@ -20,6 +20,10 @@
   F    2025-01-21  TLS   SIL findings: STOP PB is a controlled stop (was aborting via
                          SAFE_OK), tank-low and high-limit heater lockouts now latch
                          until RESET (CS-0088 review)
+  G    2026-09-27  DEV   SIL coverage to FDS Rev F: horn re-sounds on a new critical
+                         alarm while an acknowledged one is still active (4.4); pump
+                         FTS/FTP/OL faults clear and release HELD on one RESET (5.5,
+                         alarm list bits 7/8)
 =====================================================================================*)
 
 (*-------------------------------------------------------------------------------------
@@ -229,6 +233,10 @@ PROGRAM L4_WASH_01
     ANY_CRITICAL   : BOOL;
     ANY_WARNING    : BOOL;
     HORN_ACK       : BOOL;
+    PUMP_RESET     : BOOL;
+    CRIT_WORD      : WORD;
+    CRIT_WORD_PREV : WORD;
+    NEW_CRITICAL   : BOOL;
   END_VAR
 
   (*---------------------------------------------------------------------------------
@@ -269,8 +277,11 @@ PROGRAM L4_WASH_01
   A_TEMP_LOW   := (STATE = ST_EXECUTE) AND (TANK_TEMP < (SP_TEMP - 2.0 * SP_HYST)) AND NOT A_TT_FAIL;
   A_TEMP_HIGH  := (TANK_TEMP > (SP_TEMP + 10.0)) AND NOT A_TT_FAIL;
   A_VFD_FAULT  := NOT INFEED_VFD_RDY;
-  A_PUMP_OL    := PUMP.FLT_OL;
-  A_PUMP_FTS   := PUMP.FLT_FTS OR PUMP.FLT_FTP;
+  (* pump faults latch inside FB_MOTOR and clear on the same RESET edge (section 5);
+     look through the edge here so the state machine sees them cleared this scan *)
+  PUMP_RESET   := RT_RESET.Q AND PUMP_OL_OK;
+  A_PUMP_OL    := PUMP.FLT_OL AND NOT PUMP_RESET;
+  A_PUMP_FTS   := (PUMP.FLT_FTS OR PUMP.FLT_FTP) AND NOT PUMP_RESET;
 
   (* heater lockouts latch: a dry tank or a tripped high-limit needs an operator
      to look at the tank before the elements are re-enabled (CS-0088) *)
@@ -317,6 +328,13 @@ PROGRAM L4_WASH_01
               + BOOL_TO_INT(A_TT_FAIL)     * 2048
               + BOOL_TO_INT(A_BLOCKED)     * 4096
               + BOOL_TO_INT(A_HTR_HILIMIT) * 8192;
+
+  (* a critical bit that was clear last scan is a new alarm: it un-silences the horn
+     even while an acknowledged critical alarm is still active (CS-0117 5.2) *)
+  CRIT_WORD      := INT_TO_WORD(HMI_ALARMS) AND WORD#16#2FEF;
+  NEW_CRITICAL   := (CRIT_WORD AND NOT CRIT_WORD_PREV) <> WORD#16#0;
+  CRIT_WORD_PREV := CRIT_WORD;
+  IF NEW_CRITICAL THEN HORN_ACK := FALSE; END_IF;
 
   (*---------------------------------------------------------------------------------
     4. PackML state machine
@@ -489,7 +507,7 @@ PROGRAM L4_WASH_01
   STACK_GREEN := (STATE = ST_EXECUTE) OR ((STATE = ST_IDLE) AND FLASH);
 
   (* horn on abort / new critical alarm for max 30 s, silenced by RESET *)
-  T_HORN(IN := ANY_CRITICAL AND NOT HORN_ACK, PT := T#30s);
+  T_HORN(IN := ANY_CRITICAL AND NOT HORN_ACK AND NOT NEW_CRITICAL, PT := T#30s);
   HORN := ANY_CRITICAL AND NOT HORN_ACK AND NOT T_HORN.Q;
   IF NOT ANY_CRITICAL THEN HORN_ACK := FALSE; END_IF;
 

@@ -32,7 +32,7 @@ make            # iec2c -> Res0.c/Config0.c, glue_generator, builds build/libl4w
 make test       # pytest: 20 FDS-numbered tests, ~30 ms
 ```
 
-`openplc_sil.Plc` loads the compiled program, drives `%IX/%IW/%MW` by ST tag name (tag map is parsed from the `.st`, not duplicated), steps scans with simulated time (a 90 s wash runs in microseconds), and reads `%QX/%QW`. Tests are named after FDS sections (`test_fds_4_safety.py` ↔ FDS §4). Requires `g++`, `make`, `python3`, `pytest`, and a built runtime.
+`openplc_sil.Plc` loads the compiled program, drives `%IX/%IW/%MW` by ST tag name (tag map is parsed from the `.st`, not duplicated), steps scans with simulated time (a 90 s wash runs in microseconds), and reads `%QX/%QW`. Tests are named after FDS sections (`test_fds_4_safety.py` ↔ FDS §4). Requires `g++`, `make`, `python3`, `pytest`, and a built runtime. Requirement-to-test coverage: `L4-WASH-01/docs/SIL-Coverage-L4-WASH-01.md`.
 
 ## HIL — run the real runtime against a plant model
 

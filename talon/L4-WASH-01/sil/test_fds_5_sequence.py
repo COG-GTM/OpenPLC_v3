@@ -141,3 +141,122 @@ def test_5_7_cycle_counter_increments_once_per_part(in_cycle):
         plc.set("PE_INFEED", False)
         plc.scan(2)
         assert plc.seq() == 10
+
+
+def test_fds_5_1_start_refused_on_door_open_or_critical_and_allowed_cold(idle):
+    """FDS 3.1 / 5.1: 'Permissives to start (all required): AUTO selected, door closed,
+    LSL_TANK made, no critical alarm active. Temperature is not a start permissive - the
+    shift can start on a cold tank and the temp-low warning tells the operator.'"""
+    plc = idle
+    plc.set("GUARD_CLOSED", False)
+    plc.pulse("PB_START")
+    plc.run(ms=600)
+    assert plc.state() == sil.IDLE, "door open"
+    plc.set("GUARD_CLOSED", True)
+
+    plc.set("INFEED_VFD_RDY", False)  # critical, non-latched alarm
+    plc.scan(1)
+    plc.pulse("PB_START")
+    plc.run(ms=600)
+    assert plc.state() == sil.IDLE, "critical alarm active"
+    plc.set("INFEED_VFD_RDY", True)
+    plc.scan(1)
+
+    plc.set_temp_c(20.0)              # cold tank is not a permissive
+    plc.scan(1)
+    plc.pulse("PB_START")
+    plc.run(ms=600)
+    assert plc.state() == sil.EXECUTE and plc.seq() == 10
+
+
+def test_fds_5_3_pump_fail_to_stop_alarms_and_holds(washing):
+    """FDS 5.3: 'If aux remains 3 s after the command drops -> same alarm (fail-to-stop).'
+    Alarm list bit 7: 'HOLD: pump command removed ... Clears: RESET'."""
+    plc = washing
+    plc.set("SP_WASH_TIME_S", 5)
+    plc.run(seconds=6)
+    assert plc.seq() == 40 and not plc.get("PUMP_RUN")
+
+    # welded contactor: aux stays made after the command dropped
+    plc.run(seconds=2)
+    assert not plc.alarm(sil.ALM["PUMP_FTS"]) and plc.state() == sil.EXECUTE
+    assert plc.get("DOOR_LOCK"), "pump still proven running -> door stays locked"
+    plc.run(seconds=1.5)
+    assert plc.alarm(sil.ALM["PUMP_FTS"]), "fail-to-stop after 3 s with aux still made"
+    assert plc.state() == sil.HELD
+    assert plc.get("DOOR_LOCK")
+
+    plc.follow_pump_aux()             # contactor finally drops out
+    plc.scan(2)
+    assert not plc.get("DOOR_LOCK")
+    plc.pulse("PB_RESET")
+    assert not plc.alarm(sil.ALM["PUMP_FTS"])
+    assert plc.state() == sil.IDLE, "one RESET clears the pump fault and releases HELD"
+
+
+def test_fds_5_5_held_reset_start_restarts_sequence_from_step_10(washing):
+    """FDS 5.5: 'RESET -> IDLE, sequence restarts from step 10 on START.' FDS section 3:
+    HELD -> 'IDLE on RESET (cause cleared, AUTO, door closed)'. A cycle interrupted by a
+    HOLD is not resumed mid-step: the spray timer restarts and the part is not counted."""
+    plc = washing
+    plc.set("SP_WASH_TIME_S", 30)
+    plc.run(seconds=10)
+    assert 19 <= plc.get("HMI_WASH_REMAIN") <= 21
+
+    plc.set("SEL_AUTO", False)
+    plc.scan(3)
+    plc.follow_pump_aux()
+    plc.scan(1)
+    assert plc.state() == sil.HELD and plc.seq() == 30
+    assert plc.get("HMI_WASH_REMAIN") == 0
+
+    plc.set("SEL_AUTO", True)         # cause cleared alone does not un-hold
+    plc.run(seconds=1)
+    assert plc.state() == sil.HELD
+
+    plc.pulse("PB_RESET")
+    assert plc.state() == sil.IDLE and plc.seq() == 0
+    assert plc.get("HMI_CYCLE_COUNT") == 0, "interrupted part is not counted"
+
+    plc.set_many(PE_INFEED=False, PE_CHAMBER=False)   # operator pulled the part
+    plc.pulse("PB_START")
+    plc.run(ms=600)
+    assert plc.state() == sil.EXECUTE and plc.seq() == 10, "restart from step 10, not 30"
+
+    plc.set("PE_INFEED", True)        # part reloaded
+    plc.scan(2)
+    plc.set("PE_CHAMBER", True)
+    plc.scan(2)
+    assert plc.seq() == 30
+    plc.follow_pump_aux()
+    plc.scan(2)
+    assert plc.get("HMI_WASH_REMAIN") == 30, "spray timer restarted, not resumed at 20 s"
+
+
+def test_fds_5_7_cycle_counter_wraps_at_32767_never_negative(in_cycle):
+    """FDS 5.7: 'Cycle counter increments exactly once per part at the end of step 30.'
+    IO list HR6: 'Parts washed since reset, wraps at 32767' - the MES shift count must
+    never read negative."""
+    plc = in_cycle
+    plc.set("SP_WASH_TIME_S", 1)
+
+    def wash_one():
+        plc.set("PE_INFEED", True)
+        plc.set("PE_CHAMBER", True)
+        plc.scan(2)
+        plc.set("PUMP_AUX", True)
+        plc.run(seconds=1.1)
+        plc.set("PUMP_AUX", False)
+        plc.set("PE_CHAMBER", False)
+        plc.set("PE_INFEED", False)
+        plc.scan(1)
+
+    for _ in range(32767):
+        wash_one()
+    assert plc.get("HMI_CYCLE_COUNT") == 32767
+    assert plc.state() == sil.EXECUTE and plc.seq() == 10
+
+    wash_one()
+    assert plc.get("HMI_CYCLE_COUNT") == 0, "wraps to zero, never negative"
+    wash_one()
+    assert plc.get("HMI_CYCLE_COUNT") == 1
