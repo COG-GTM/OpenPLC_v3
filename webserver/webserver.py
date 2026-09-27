@@ -9,6 +9,7 @@ import datetime
 import time
 import pages
 import openplc
+import user_auth
 import monitoring as monitor
 import sys
 import ctypes
@@ -561,20 +562,16 @@ def request_loader(request):
     conn = create_connection(database)
     if (conn != None):
         try:
-            cur = conn.cursor()
-            cur.execute("SELECT username, password, name, pict_file FROM Users")
-            rows = cur.fetchall()
-            cur.close()
+            result = user_auth.authenticate(conn, username, request.form.get('password'))
             conn.close()
 
-            for row in rows:
-                if (row[0] == username):
-                    user = User()
-                    user.id = row[0]
-                    user.name = row[2]
-                    user.pict_file = str(row[3])
-                    user.is_authenticated = (request.form['password'] == row[1])
-                    return user
+            if (result.ok):
+                user = User()
+                user.id = result.username
+                user.name = result.name
+                user.pict_file = result.pict_file
+                user.is_authenticated = result.session_allowed
+                return user
             return
                     
         except Error as e:
@@ -610,24 +607,20 @@ def login():
     conn = create_connection(database)
     if (conn != None):
         try:
-            cur = conn.cursor()
-            cur.execute("SELECT username, password, name, pict_file FROM Users")
-            rows = cur.fetchall()
-            cur.close()
+            result = user_auth.authenticate(conn, username, password)
             conn.close()
 
-            for row in rows:
-                if (row[0] == username):
-                    if (row[1] == password):
-                        user = User()
-                        user.id = row[0]
-                        user.name = row[2]
-                        user.pict_file = str(row[3])
-                        flask_login.login_user(user)
-                        return flask.redirect(flask.url_for('dashboard'))
-                    else:
-                        return pages.login_head + pages.bad_login_body
-                        
+            if (result.rotation_required):
+                flask.session['rotate_user'] = result.username
+                return flask.redirect(flask.url_for('change_password'))
+            if (result.ok):
+                user = User()
+                user.id = result.username
+                user.name = result.name
+                user.pict_file = result.pict_file
+                flask_login.login_user(user)
+                return flask.redirect(flask.url_for('dashboard'))
+
             return pages.login_head + pages.bad_login_body
                     
         except Error as e:
@@ -637,6 +630,52 @@ def login():
         return 'Error opening DB'
 
     return pages.login_head + pages.bad_login_body
+
+
+@app.route('/change-password', methods=['GET', 'POST'])
+def change_password():
+    username = flask.session.get('rotate_user')
+    if (username == None):
+        return flask.redirect(flask.url_for('login'))
+
+    if flask.request.method == 'GET':
+        return pages.change_password_head + pages.change_password_body
+
+    current_password = flask.request.form['current_password']
+    new_password = flask.request.form['new_password']
+    confirm_password = flask.request.form['confirm_password']
+
+    if (new_password != confirm_password):
+        return pages.change_password_head + pages.change_password_error("New passwords do not match")
+
+    database = "openplc.db"
+    conn = create_connection(database)
+    if (conn != None):
+        try:
+            result = user_auth.authenticate(conn, username, current_password)
+            if (not result.ok):
+                conn.close()
+                return pages.change_password_head + pages.change_password_error("Current password is incorrect")
+            try:
+                user_auth.set_password(conn, username, new_password)
+            except ValueError as e:
+                conn.close()
+                return pages.change_password_head + pages.change_password_error(str(e))
+            conn.close()
+
+            flask.session.pop('rotate_user', None)
+            user = User()
+            user.id = result.username
+            user.name = result.name
+            user.pict_file = result.pict_file
+            flask_login.login_user(user)
+            return flask.redirect(flask.url_for('dashboard'))
+
+        except Error as e:
+            print("error connecting to the database" + str(e))
+            return 'Error opening DB'
+    else:
+        return 'Error opening DB'
 
 
 @app.route('/start_plc')
@@ -2073,7 +2112,7 @@ def add_user():
             name = flask.request.form['full_name']
             username = flask.request.form['user_name']
             email = flask.request.form['user_email']
-            password = flask.request.form['user_password']
+            password = user_auth.hash_password(flask.request.form['user_password'])
 
             (name, username, email) = sanitize_input(name, username, email)
 
@@ -2219,8 +2258,8 @@ def edit_user():
             if (conn != None):
                 try:
                     cur = conn.cursor()
-                    if (password != "mypasswordishere"):
-                        cur.execute("UPDATE Users SET name = ?, username = ?, email = ?, password = ? WHERE user_id = ?", (name, username, email, password, int(user_id)))
+                    if (password != user_auth.PASSWORD_UNCHANGED_SENTINEL):
+                        cur.execute("UPDATE Users SET name = ?, username = ?, email = ?, password = ? WHERE user_id = ?", (name, username, email, user_auth.hash_password(password), int(user_id)))
                     else:
                         cur.execute("UPDATE Users SET name = ?, username = ?, email = ? WHERE user_id = ?", (name, username, email, int(user_id)))
                     conn.commit()
