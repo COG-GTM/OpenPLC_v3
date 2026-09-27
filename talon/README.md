@@ -20,7 +20,7 @@ talon/
 Build the runtime once (`./install.sh linux` from the repo root — compiles MatIEC, libmodbus, the runtime), then either:
 
 - **Web UI**: `./start_openplc.sh`, open `http://localhost:8080` (default user `openplc`/`openplc`), Programs → Upload `talon/L4-WASH-01/L4_WASH_01.st`, Launch. Modbus/TCP is on 502 (root) — the HMI/MES registers are HR 0–7 and setpoints HR 1024–1029 (see the IO list).
-- **Headless**: from `webserver/`, `cp ../talon/L4-WASH-01/L4_WASH_01.st st_files/ && ./scripts/compile_program.sh L4_WASH_01.st`, then `cd core && ./openplc` and send `start_modbus(15020)` to the interactive server on 43628.
+- **Headless**: from `webserver/`, `cp ../talon/L4-WASH-01/L4_WASH_01.st st_files/ && ./scripts/compile_program.sh L4_WASH_01.st`, then `./core/openplc` (run from `webserver/` — the PSM layer launches `./core/psm/main.py` relative to the cwd) and send `start_modbus(15020)` to the interactive server on 43628. `L4-WASH-01/hil/hil_smoke.py` automates this: one part cycle plus an E-stop, logging HR 0–7 and HR 1024–1029 (`L4-WASH-01/docs/HIL-Smoke-L4-WASH-01.md`).
 
 With no I/O attached the program sits in ABORTED (state 9) with alarm word 0x2305 — E-stop, tank low, pump overload, both transmitters, heater high-limit — which is exactly what an unwired controller should report.
 
@@ -42,7 +42,7 @@ make test       # pytest: 20 FDS-numbered tests, ~30 ms
 
 Typical asks, in the order they land:
 
-1. *"Read `talon/L4-WASH-01/L4_WASH_01.st` and `docs/FDS-L4-WASH-01.md`. Which FDS requirements have no test in `sil/`? Add them."* — the fail-to-start/stop alarm half of §5.3, §6.8 (temp high) and the horn re-sound in §4.4 are intentionally untested.
+1. *"Read `talon/L4-WASH-01/L4_WASH_01.st` and `docs/FDS-L4-WASH-01.md`. Which FDS requirements have no test in `sil/`? Add them."* — as of Rev G every FDS requirement and alarm-list row has a test (`docs/SIL-Coverage-L4-WASH-01.md`); use the matrix to check a new FDS revision.
 2. *"Cell 4-40 is adding a second outfeed photoeye. Extend the FDS, IO list, program and SIL tests — one PR."*
 3. *"Run the OT security review in `talon/SECURITY-SWARM.md`: confirm each finding against the code, prove it with a test, fix it in the runtime, keep `make -C talon/L4-WASH-01/sil test` green. One PR per finding."*
 
