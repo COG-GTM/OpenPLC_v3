@@ -1204,6 +1204,8 @@ settings_tail = """
             var auto_run_text = document.getElementById('auto_run_text');
             var snap7_run_checkbox = document.getElementById('snap7_run');
             var snap7_run_text = document.getElementById('snap7_run_text');
+            var psm_editing_checkbox = document.getElementById('psm_editing');
+            var psm_editing_text = document.getElementById('psm_editing_text');
             
             if (modbus_checkbox.checked == true)
             {
@@ -1257,6 +1259,14 @@ settings_tail = """
             {
                 snap7_run_text.value = 'false';
             }
+            if (psm_editing_checkbox.checked == true)
+            {
+                psm_editing_text.value = 'true';
+            }
+            else
+            {
+                psm_editing_text.value = 'false';
+            }
         }
 
         document.getElementById('modbus_server').onchange = function()
@@ -1285,6 +1295,11 @@ settings_tail = """
         }
         
         document.getElementById('snap7_run').onchange = function()
+        {
+            setupCheckboxes();
+        }
+        
+        document.getElementById('psm_editing').onchange = function()
         {
             setupCheckboxes();
         }
@@ -1430,9 +1445,11 @@ hardware_tail = """</textarea>
     </body>
     
     <script type="text/javascript">
+    var psm_read_only = document.getElementById('custom_layer_code').hasAttribute('readonly');
     var myCodeMirror = CodeMirror.fromTextArea(custom_layer_code, 
     {
         lineNumbers: true,
+        readOnly: psm_read_only,
         styleActiveLine: true,
         matchBrackets: true,
         theme: "liquibyte",
@@ -1497,7 +1514,7 @@ hardware_tail = """</textarea>
         var restore_button = document.getElementById('code_restore');
         if (drop_down.value == "psm_linux" || drop_down.value == "psm_win")
         {
-            restore_button.style.display = "inline";
+            restore_button.style.display = psm_read_only ? "none" : "inline";
             psm_div.style.visibility = "visible";
         }
         else
