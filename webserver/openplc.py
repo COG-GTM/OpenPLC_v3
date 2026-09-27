@@ -8,6 +8,9 @@ from queue import Queue, Empty
 import os
 import os.path
 
+INTERACTIVE_PORT = 43628
+CTL_TOKEN_FILE_DEFAULT = './openplc_ctl.token'
+
 intervals = (
     ('weeks', 604800),  # 60 * 60 * 24 * 7
     ('days', 86400),    # 60 * 60 * 24
@@ -86,14 +89,26 @@ class runtime:
             self.theprocess = subprocess.Popen(['./core/openplc'])  # XXX: iPAS
             self.runtime_status = "Running"
 
+    def _control_token(self):
+        token_file = os.environ.get('OPENPLC_CTL_TOKEN_FILE') or CTL_TOKEN_FILE_DEFAULT
+        try:
+            with open(token_file, 'r') as f:
+                return f.read().strip()
+        except OSError:
+            print(f'Control token file {token_file} is not readable, is the runtime active?')
+            return None
+
     def _rpc(self, msg, timeout=1000):
         data = ""
         if not self.runtime_status == "Running":
             return data
+        token = self._control_token()
+        if not token:
+            return data
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect(('localhost', 43628))
-            s.send(f'{msg}\n'.encode('utf-8'))
+            s.connect(('localhost', INTERACTIVE_PORT))
+            s.send(f'{token} {msg}\n'.encode('utf-8'))
             data = s.recv(timeout).decode('utf-8')
             s.close()
             self.runtime_status = "Running"
