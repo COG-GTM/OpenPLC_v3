@@ -122,7 +122,7 @@ def checkTableSettings(conn):
     checkSettingExists(conn, 'snap7', 'false')
     checkSettingExists(conn, 'Slave_polling', '100')
     checkSettingExists(conn, 'Slave_timeout', '1000')
-    checkSettingExists(conn, 'Enip_port', '44818')
+    checkSettingExists(conn, 'Enip_port', 'disabled')
     checkSettingExists(conn, 'Pstorage_polling', 'disabled')
     return
 
