@@ -1,7 +1,7 @@
 from flask import Flask, Blueprint, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 
-from flask_jwt_extended import create_access_token, current_user, jwt_required, JWTManager, verify_jwt_in_request, get_jwt
+from flask_jwt_extended import create_access_token, current_user, jwt_required, JWTManager, verify_jwt_in_request, get_jwt, get_jwt_identity
 from werkzeug.security import generate_password_hash, check_password_hash
 
 import logging
@@ -128,10 +128,18 @@ def create_user():
     return jsonify({"msg": "User created", "id": user.id}), 201
 
 
+def is_jwt_owner(user_id) -> bool:
+    """True when the caller's JWT identity is the account addressed by user_id."""
+    return str(get_jwt_identity()) == str(user_id)
+
+
 # verify existing users individually
 @restapi_bp.route("/get-user-info/<int:user_id>", methods=["GET"])
 @jwt_required()
 def get_user_info(user_id):
+    if not is_jwt_owner(user_id):
+        return jsonify({"msg": "Forbidden"}), 403
+
     try:
         user = User.query.get(user_id)
     except Exception as e:
@@ -169,10 +177,13 @@ def get_users_info():
     return jsonify([user.to_dict() for user in users]), 200
 
 
-# password change for specific user by any authenticated user
+# password change, restricted to the account owning the JWT
 @restapi_bp.route("/password-change/<int:user_id>", methods=["PUT"])
 @jwt_required()
 def change_password(user_id):
+    if not is_jwt_owner(user_id):
+        return jsonify({"msg": "Forbidden"}), 403
+
     data = request.get_json()
     old_password = data.get("old_password")
     new_password = data.get("new_password")
@@ -197,10 +208,13 @@ def change_password(user_id):
 
     return jsonify({"msg": f"Password for user {user.username} updated successfully"}), 200
 
-# delete a user by ID
+# delete a user by ID, restricted to the account owning the JWT
 @restapi_bp.route("/delete-user/<int:user_id>", methods=["DELETE"])
 @jwt_required()
 def delete_user(user_id):
+    if not is_jwt_owner(user_id):
+        return jsonify({"msg": "Forbidden"}), 403
+
     try:
         user = User.query.get(user_id)
     except Exception as e:
