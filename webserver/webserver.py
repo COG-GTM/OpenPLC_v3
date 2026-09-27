@@ -2539,13 +2539,15 @@ def settings():
             try:
                 hostname_change = apply_device_hostname(device_hostname, hostname_os_sync)
             except InvalidHostname as e:
-                return flask.Response(pages.w3_style + """
+                return flask.Response(pages.w3_style + pages.settings_style + """
             <div class="w3-container w3-margin">
                 <h2>Invalid hostname</h2>
                 <p>""" + escape(str(e)) + """</p>
                 <p>Use letters, digits and hyphens only (RFC 1123); labels must not start or end with a hyphen. Nothing was changed.</p>
                 <a href='settings' class='w3-button w3-blue'>Back to Settings</a>
-            </div>""", status=400, mimetype='text/html')
+            </div>
+    </body>
+</html>""", status=400, mimetype='text/html')
             device_hostname = hostname_change.hostname
 
             database = "openplc.db"

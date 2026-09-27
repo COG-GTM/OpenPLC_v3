@@ -66,7 +66,8 @@ def test_settings_post_rejects_invalid_hostname_with_400_and_no_hostnamectl(clie
     resp = client.post("/settings", data=dict(SETTINGS_FORM, device_hostname=bad, hostname_os_sync="true"))
 
     assert resp.status_code == 400
-    assert b"Invalid hostname" in resp.data
+    body = resp.data.split(b"<body>", 1)[1]
+    assert b"Invalid hostname" in body and b"Back to Settings" in body
     assert run.calls == [], "hostnamectl must never see an unvalidated hostname"
 
 
