@@ -34,11 +34,15 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <time.h>
+#include <sys/stat.h>
 
 #include "ladder.h"
 #include "oplc_snap7.h"
 
 #define BUFFER_SIZE 1024
+#define CTL_TOKEN_BYTES 32
+#define CTL_TOKEN_LEN (CTL_TOKEN_BYTES * 2)
+#define CTL_TOKEN_FILE_DEFAULT "./openplc_ctl.token"
 
 //Global Variables
 bool ethercat_configured = 0;
@@ -57,6 +61,8 @@ int command_index = 0;
 bool processing_command = 0;
 time_t start_time;
 time_t end_time;
+char ctl_token[CTL_TOKEN_LEN + 1];
+char ctl_token_file[BUFFER_SIZE];
 
 //Global Threads
 pthread_t modbus_thread;
@@ -146,6 +152,73 @@ unsigned char *readCommandArgumentStr(unsigned char *command)
     }
 
     return argument;
+}
+
+//-----------------------------------------------------------------------------
+// Generate the per-boot control token and publish it in an owner-only file
+// so the local webserver can authenticate to the interactive server. The
+// file location can be overridden with OPENPLC_CTL_TOKEN_FILE.
+//-----------------------------------------------------------------------------
+void createControlToken()
+{
+    char log_msg[1000];
+    unsigned char random_bytes[CTL_TOKEN_BYTES];
+    const char *hex = "0123456789abcdef";
+
+    const char *path = getenv("OPENPLC_CTL_TOKEN_FILE");
+    if (path == NULL || path[0] == '\0') path = CTL_TOKEN_FILE_DEFAULT;
+    strncpy(ctl_token_file, path, sizeof(ctl_token_file) - 1);
+    ctl_token_file[sizeof(ctl_token_file) - 1] = '\0';
+
+    int urandom_fd = open("/dev/urandom", O_RDONLY);
+    if (urandom_fd < 0 || read(urandom_fd, random_bytes, sizeof(random_bytes)) != (ssize_t)sizeof(random_bytes))
+    {
+        sprintf(log_msg, "Interactive Server: error generating control token => %s\n", strerror(errno));
+        openplc_log(log_msg);
+        exit(1);
+    }
+    close(urandom_fd);
+
+    for (int i = 0; i < CTL_TOKEN_BYTES; i++)
+    {
+        ctl_token[2 * i] = hex[random_bytes[i] >> 4];
+        ctl_token[2 * i + 1] = hex[random_bytes[i] & 0x0f];
+    }
+    ctl_token[CTL_TOKEN_LEN] = '\0';
+
+    unlink(ctl_token_file);
+    int token_fd = open(ctl_token_file, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, S_IRUSR | S_IWUSR);
+    if (token_fd < 0 || fchmod(token_fd, S_IRUSR | S_IWUSR) < 0 ||
+        write(token_fd, ctl_token, CTL_TOKEN_LEN) != CTL_TOKEN_LEN || write(token_fd, "\n", 1) != 1)
+    {
+        sprintf(log_msg, "Interactive Server: error writing control token file %s => %s\n", ctl_token_file, strerror(errno));
+        openplc_log(log_msg);
+        exit(1);
+    }
+    close(token_fd);
+
+    sprintf(log_msg, "Interactive Server: control token written to %s\n", ctl_token_file);
+    openplc_log(log_msg);
+}
+
+//-----------------------------------------------------------------------------
+// Constant-time check of the token that prefixes a command. On success
+// returns a pointer to the command that follows the token, otherwise NULL.
+//-----------------------------------------------------------------------------
+unsigned char *authenticateCommand(unsigned char *buffer)
+{
+    unsigned char diff = 0;
+
+    for (int i = 0; i < CTL_TOKEN_LEN; i++)
+    {
+        diff |= buffer[i] ^ (unsigned char)ctl_token[i];
+        if (buffer[i] == '\0') return NULL;
+    }
+    if (diff != 0 || buffer[CTL_TOKEN_LEN] != ' ') return NULL;
+
+    unsigned char *command = buffer + CTL_TOKEN_LEN + 1;
+    while (*command == ' ') command++;
+    return command;
 }
 
 //-----------------------------------------------------------------------------
@@ -246,6 +319,16 @@ void processCommand(unsigned char *buffer, int client_fd)
     {
         count_char = sprintf(buffer, "Processing command...\n");
         write(client_fd, buffer, count_char);
+        return;
+    }
+
+    buffer = authenticateCommand(buffer);
+    if (buffer == NULL)
+    {
+        sprintf(log_msg, "Interactive Server: rejected unauthenticated command from client ID: %d\n", client_fd);
+        openplc_log(log_msg);
+        count_char = sprintf(log_msg, "Error: authentication required\n");
+        write(client_fd, log_msg, count_char);
         return;
     }
 
@@ -556,6 +639,7 @@ void startInteractiveServer(int port)
 {
     char log_msg[1000];
     int socket_fd, client_fd;
+    createControlToken();
     socket_fd = createSocket_interactive(port);
 
     while(run_openplc)
@@ -595,5 +679,6 @@ void startInteractiveServer(int port)
     printf("Closing socket...\n");
     closeSocket(socket_fd);
     closeSocket(client_fd);
+    unlink(ctl_token_file);
     printf("Terminating interactive server thread\n");
 }
