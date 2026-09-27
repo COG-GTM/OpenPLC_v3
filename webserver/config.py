@@ -5,7 +5,7 @@ import secrets
 import logging
 
 from pathlib import Path
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 
 # Always resolve .env relative to the repo root to guarantee it is found
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
@@ -23,14 +23,25 @@ logging.basicConfig(
 def is_valid_env(var_name, value):
     if var_name == "SQLALCHEMY_DATABASE_URI":
         return value.startswith("sqlite:///")
-    elif var_name in ("JWT_SECRET_KEY", "PEPPER"):
+    elif var_name in ("JWT_SECRET_KEY", "PEPPER", "SECRET_KEY"):
         return bool(re.fullmatch(r"[a-fA-F0-9]{64}", value))
     return False
+
+_TRUE_VALUES = ("1", "true", "yes", "on")
+
+def _env_flag(name, file_values, default=False):
+    raw = file_values.get(name)
+    if raw is None:
+        raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in _TRUE_VALUES
 
 # Function to generate a new .env file with valid defaults
 def generate_env_file():
     jwt = secrets.token_hex(32)
     pepper = secrets.token_hex(32)
+    secret_key = secrets.token_hex(32)
     uri = "sqlite:///{DB_PATH}"
 
     with open(ENV_PATH, "w") as f:
@@ -38,6 +49,10 @@ def generate_env_file():
         f.write(f"SQLALCHEMY_DATABASE_URI={uri}\n")
         f.write(f"JWT_SECRET_KEY={jwt}\n")
         f.write(f"PEPPER={pepper}\n")
+        f.write(f"SECRET_KEY={secret_key}\n")
+        f.write("# Set to true when the web UI is served over TLS (reverse proxy).\n")
+        f.write("SESSION_COOKIE_SECURE=false\n")
+        f.write("FORCE_HTTPS_REDIRECT=false\n")
 
     os.chmod(ENV_PATH, 0o600)
     logger.info(f".env file created at {ENV_PATH}")
@@ -72,6 +87,38 @@ except RuntimeError as e:
     else:
         logger.error("Exiting due to invalid environment configuration.")
         exit(1)
+
+
+def ensure_secret_key(env_path=None):
+    """Return the persistent Flask SECRET_KEY stored in the .env file,
+    generating one (and appending it with 0600 permissions) if absent."""
+    env_path = Path(env_path or ENV_PATH)
+    values = dotenv_values(env_path) if env_path.is_file() else {}
+    key = values.get("SECRET_KEY")
+    if not key or not is_valid_env("SECRET_KEY", key):
+        key = secrets.token_hex(32)
+        with open(env_path, "a") as f:
+            f.write(f"SECRET_KEY={key}\n")
+        os.chmod(env_path, 0o600)
+        logger.info(f"SECRET_KEY generated and stored in {env_path}")
+    return key
+
+
+def apply_session_security(app, env_path=None):
+    """Configure a Flask app with the persistent SECRET_KEY and hardened
+    session-cookie attributes. SESSION_COOKIE_SECURE and FORCE_HTTPS_REDIRECT
+    are opt-in so the plaintext HTTP bench keeps working until TLS is
+    terminated in front of the UI."""
+    env_path = Path(env_path or ENV_PATH)
+    values = dotenv_values(env_path) if env_path.is_file() else {}
+    app.config.update(
+        SECRET_KEY=ensure_secret_key(env_path),
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=_env_flag("SESSION_COOKIE_SECURE", values),
+        FORCE_HTTPS_REDIRECT=_env_flag("FORCE_HTTPS_REDIRECT", values),
+    )
+    return app
 
 
 class Config:

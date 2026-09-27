@@ -22,6 +22,7 @@ import errno
 import flask
 import flask_login
 
+import config
 from credentials import CertGen
 from restapi import app_restapi, restapi_bp, db, register_callback_get, register_callback_post
 from dataclasses import dataclass, field
@@ -29,7 +30,7 @@ from enum import Enum, auto
 
 
 app = flask.Flask(__name__)
-app.secret_key = str(os.urandom(16))
+config.apply_session_security(app)
 login_manager = flask_login.LoginManager()
 login_manager.init_app(app)
 
@@ -586,6 +587,10 @@ def request_loader(request):
 
 @app.before_request
 def before_request():
+    if app.config.get('FORCE_HTTPS_REDIRECT'):
+        forwarded_proto = flask.request.headers.get('X-Forwarded-Proto', '')
+        if not flask.request.is_secure and forwarded_proto.lower() != 'https':
+            return flask.redirect(flask.request.url.replace('http://', 'https://', 1), code=301)
     flask.session.permanent = True
     app.permanent_session_lifetime = datetime.timedelta(minutes=5)
     flask.session.modified = True
