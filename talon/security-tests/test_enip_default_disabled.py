@@ -9,12 +9,14 @@ and an operator must still be able to re-enable it through Settings.
 """
 import re
 import socket
+import sqlite3
 
 import pytest
 
 from conftest import SHIPPED_DB, get_setting, set_setting
 
 webserver = pytest.importorskip("webserver")
+check_openplc_db = pytest.importorskip("check_openplc_db")
 
 
 class FakeRuntime:
@@ -46,6 +48,16 @@ def fake_runtime(monkeypatch):
 
 def test_shipped_db_has_enip_disabled():
     assert get_setting(SHIPPED_DB, "Enip_port") == "disabled"
+
+
+def test_db_migration_seeds_enip_disabled(db_copy):
+    conn = sqlite3.connect(db_copy)
+    conn.execute("DELETE FROM Settings WHERE Key = 'Enip_port'")
+    conn.commit()
+    check_openplc_db.checkTableSettings(conn)
+    conn.commit()
+    conn.close()
+    assert get_setting(db_copy, "Enip_port") == "disabled"
 
 
 def test_startup_does_not_start_enip_with_shipped_defaults(webserver_cwd, fake_runtime):
