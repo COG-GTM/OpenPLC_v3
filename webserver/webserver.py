@@ -174,12 +174,18 @@ IMAGE_MAGIC_NUMBERS = {
     b'GIF89a': 'image/gif',  # GIF89a
 }
 
-# Function to check MIME type and file signature
-def is_allowed_file(file):
-    # First, check the MIME type based on the file extension
+IMAGE_EXTENSIONS = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+}
+
+# Returns the image MIME type detected from the file signature, or None if the
+# file is not an allowed image (checks the extension-derived MIME type first)
+def detect_image_type(file):
     mime_type, _ = mimetypes.guess_type(file.filename)
     if mime_type not in IMAGE_MAGIC_NUMBERS.values():
-        return False
+        return None
 
     try:
         # Read the first 8 bytes of the file to determine its magic number
@@ -190,11 +196,22 @@ def is_allowed_file(file):
         # Check if the file header matches a known image format
         for magic, expected_mime in IMAGE_MAGIC_NUMBERS.items():
             if file_header.startswith(magic):
-                return True
+                return expected_mime
 
-        return False
+        return None
     except Exception:
-        return False
+        return None
+
+# Function to check MIME type and file signature
+def is_allowed_file(file):
+    return detect_image_type(file) is not None
+
+# Builds a server-chosen picture filename whose extension comes from the
+# detected image type, never from the client-supplied name
+def picture_filename(file):
+    return str(random.randint(1,1000000)) + "." + IMAGE_EXTENSIONS[detect_image_type(file)]
+
+INVALID_PROGRAM_FILENAME_MSG = 'Invalid program file name: must be a plain <name>.st file inside st_files/ (no path separators or "..")'
 
 def configure_runtime():
     global openplc_runtime
@@ -1070,6 +1087,9 @@ def upload_program_action():
         prog_file = flask.request.form['prog_file']
         epoch_time = flask.request.form['epoch_time']
 
+        if not openplc.is_safe_st_filename(prog_file):
+            return INVALID_PROGRAM_FILENAME_MSG, 400
+
                #validate epoch_time format and range
         try:
             epoch_time = int(epoch_time)
@@ -1112,6 +1132,8 @@ def compile_program():
     else:
         if (openplc_runtime.status() == "Compiling"): return draw_compiling_page()
         st_file = flask.request.args.get('file')
+        if not openplc.is_safe_st_filename(st_file):
+            return INVALID_PROGRAM_FILENAME_MSG, 400
         
         #load information about the program being compiled into the openplc_runtime object
         database = "openplc.db"
@@ -1121,11 +1143,13 @@ def compile_program():
                 cur = conn.cursor()
                 cur.execute("SELECT * FROM Programs WHERE File=?", (st_file,))
                 row = cur.fetchone()
+                cur.close()
+                conn.close()
+                if row is None:
+                    return 'Invalid program file name: not a registered program', 400
                 openplc_runtime.project_name = str(row[1])
                 openplc_runtime.project_description = str(row[2])
                 openplc_runtime.project_file = str(row[3])
-                cur.close()
-                conn.close()
             except Error as e:
                 print("error connecting to the database" + str(e))
         else:
@@ -2093,8 +2117,7 @@ def add_user():
                             if not is_allowed_file(pict_file):
                                 return 'Invalid file format. Only JPEG, PNG, and GIF images are allowed.', 400
 
-                            file_extension = pict_file.filename.split('.')
-                            filename = str(random.randint(1,1000000)) + "." + file_extension[-1]
+                            filename = picture_filename(pict_file)
                             pict_file.save(os.path.join('static', filename))
                             cur.execute("INSERT INTO Users (name, username, email, password, pict_file) VALUES (?, ?, ?, ?, ?)", (name, username, email, password, "/static/"+filename))
                         else:
@@ -2231,8 +2254,7 @@ def edit_user():
                             if not is_allowed_file(pict_file):
                                 return 'Invalid file format. Only JPEG, PNG, and GIF images are allowed.', 400
                             
-                            file_extension = pict_file.filename.split('.')
-                            filename = str(random.randint(1,1000000)) + "." + file_extension[-1]
+                            filename = picture_filename(pict_file)
                             pict_file.save(os.path.join('static', filename))
                             cur.execute("UPDATE Users SET pict_file = ? WHERE user_id = ?", ("/static/"+filename, int(user_id)))
                             conn.commit()

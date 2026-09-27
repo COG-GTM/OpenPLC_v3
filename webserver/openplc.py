@@ -7,6 +7,18 @@ from threading import Thread, Lock
 from queue import Queue, Empty
 import os
 import os.path
+import re
+
+ST_FILES_DIR = 'st_files'
+ST_FILENAME_RE = re.compile(r'^[A-Za-z0-9_.-]+\.st$')
+
+def is_safe_st_filename(st_file, st_dir=ST_FILES_DIR):
+    """True only for a bare '<name>.st' file name that resolves inside st_dir."""
+    if not isinstance(st_file, str) or not ST_FILENAME_RE.match(st_file) or '..' in st_file:
+        return False
+    base = os.path.realpath(st_dir)
+    target = os.path.realpath(os.path.join(base, st_file))
+    return os.path.dirname(target) == base and os.path.basename(target) == st_file
 
 intervals = (
     ('weeks', 604800),  # 60 * 60 * 24 * 7
@@ -111,6 +123,9 @@ class runtime:
                 time.sleep(1)  # https://www.reddit.com/r/learnpython/comments/776r96/defunct_python_process_when_using_subprocesspopen/
     
     def compile_program(self, st_file):
+        if not is_safe_st_filename(st_file):
+            raise ValueError('Invalid program file name')
+
         if (self.status() == "Running"):
             self.stop_runtime()
         
