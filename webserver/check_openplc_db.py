@@ -124,6 +124,7 @@ def checkTableSettings(conn):
     checkSettingExists(conn, 'Slave_timeout', '1000')
     checkSettingExists(conn, 'Enip_port', '44818')
     checkSettingExists(conn, 'Pstorage_polling', 'disabled')
+    checkSettingExists(conn, 'Psm_editing_enabled', 'false')
     return
 
 def checkTableSlave_dev(conn):

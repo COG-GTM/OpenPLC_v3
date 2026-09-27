@@ -18,6 +18,7 @@ import ssl
 import threading
 import logging
 import errno
+import hashlib
 
 import flask
 import flask_login
@@ -195,6 +196,84 @@ def is_allowed_file(file):
         return False
     except Exception:
         return False
+
+PSM_EDITING_SETTING = 'Psm_editing_enabled'
+PSM_CODE_FILE = './core/psm/main.py'
+PSM_ORIGINAL_CODE_FILE = './core/psm/main.original'
+PSM_EDITING_DISABLED_MSG = ("PSM hardware-layer code editing is disabled on this controller. "
+                            "The Python SubModule (PSM) code is executed by the runtime, so it can only be "
+                            "changed after an operator enables 'Allow PSM hardware-layer code editing' in Settings. "
+                            "Every PSM write is recorded in the Psm_audit table.")
+
+
+class PsmEditingDisabled(Exception):
+    pass
+
+
+def psm_editing_enabled(database="openplc.db"):
+    conn = create_connection(database)
+    if (conn == None):
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT Value FROM Settings WHERE Key = ?", (PSM_EDITING_SETTING,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return row != None and str(row[0]).strip().lower() == 'true'
+    except Error as e:
+        print("error connecting to the database" + str(e))
+        return False
+
+
+def record_psm_audit(username, action, byte_length, sha256, database="openplc.db"):
+    conn = create_connection(database)
+    if (conn == None):
+        raise Error("could not open " + database + " to record the PSM audit entry")
+    cur = conn.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS Psm_audit (
+        audit_id    INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        timestamp   TEXT NOT NULL,
+        username    TEXT NOT NULL,
+        action      TEXT NOT NULL,
+        byte_length INTEGER NOT NULL,
+        sha256      TEXT NOT NULL)""")
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
+    cur.execute("INSERT INTO Psm_audit (timestamp, username, action, byte_length, sha256) VALUES (?, ?, ?, ?, ?)",
+                (timestamp, str(username), action, int(byte_length), sha256))
+    conn.commit()
+    cur.close()
+    conn.close()
+    logger.warning("PSM %s by user '%s': %d bytes, sha256=%s", action, username, byte_length, sha256)
+
+
+def write_psm_code(custom_layer_code, username, action='edit', database="openplc.db", psm_file=PSM_CODE_FILE):
+    if not psm_editing_enabled(database):
+        raise PsmEditingDisabled(PSM_EDITING_DISABLED_MSG)
+    data = custom_layer_code.encode('utf-8')
+    with open(psm_file, 'w+') as f: f.write(custom_layer_code)
+    record_psm_audit(username, action, len(data), hashlib.sha256(data).hexdigest(), database)
+
+
+def psm_code_differs(submitted_code, current_code):
+    return submitted_code.replace('\r\n', '\n') != current_code.replace('\r\n', '\n')
+
+
+def draw_psm_editing_disabled_page(message):
+    return_str = pages.w3_style + pages.style + draw_top_div()
+    return_str += """
+            <div class='main'>
+                <div style="margin-left:70px; margin-right:70px">
+                    <br>
+                    <h2>PSM code editing is disabled</h2>
+                    <p>""" + escape(message) + """</p>
+                    <p><a href='hardware'>Back to Hardware</a> &nbsp;|&nbsp; <a href='settings'>Open Settings</a></p>
+                </div>
+            </div>
+        </body>
+    </html>"""
+    return return_str
+
 
 def configure_runtime():
     global openplc_runtime
@@ -1945,16 +2024,27 @@ def hardware():
                         <br>
                         <div id="psm_code" style="visibility:hidden">
                             <p><b>OpenPLC Python SubModule (PSM)</b><p>
-                            <p>PSM is a powerful bridge that connects OpenPLC core to Python. You can use PSM to write your own OpenPLC driver in pure Python. See below for a sample driver that switches %IX0.0 every second</p>
+                            <p>PSM is a powerful bridge that connects OpenPLC core to Python. You can use PSM to write your own OpenPLC driver in pure Python. See below for a sample driver that switches %IX0.0 every second</p>"""
+            if psm_editing_enabled():
+                return_str += """
                             <textarea wrap="off" spellcheck="false" name="custom_layer_code" id="custom_layer_code">"""
-            with open('./core/psm/main.py') as f: return_str += f.read()
+            else:
+                return_str += """
+                            <p style="color:#B00020"><b>PSM hardware-layer code editing is disabled.</b> The code below is read-only. To modify it, enable 'Allow PSM hardware-layer code editing' in <a href='settings'>Settings</a>; every change is then recorded in the PSM audit log.</p>
+                            <textarea wrap="off" spellcheck="false" name="custom_layer_code" id="custom_layer_code" readonly>"""
+            with open(PSM_CODE_FILE) as f: return_str += f.read()
             return_str += pages.hardware_tail
             
         else:
             hardware_layer = flask.request.form['hardware_layer']
             custom_layer_code = flask.request.form['custom_layer_code']
             with open('./active_program') as f: current_program = f.read()
-            with open('./core/psm/main.py', 'w+') as f: f.write(custom_layer_code)
+            with open(PSM_CODE_FILE) as f: current_psm_code = f.read()
+            if psm_code_differs(custom_layer_code, current_psm_code):
+                try:
+                    write_psm_code(custom_layer_code, flask_login.current_user.id)
+                except PsmEditingDisabled as e:
+                    return draw_psm_editing_disabled_page(str(e)), 403
             
             subprocess.call(['./scripts/change_hardware_layer.sh', hardware_layer])
             return "<head><meta http-equiv=\"refresh\" content=\"0; URL='compile-program?file=" + current_program + "'\" /></head>"
@@ -1970,8 +2060,11 @@ def restore_custom_hardware():
         if (openplc_runtime.status() == "Compiling"): return draw_compiling_page()
         
         #Restore the original custom layer code
-        with open('./core/psm/main.original') as f: original_code = f.read()
-        with open('./core/psm/main.py', 'w+') as f: f.write(original_code)
+        with open(PSM_ORIGINAL_CODE_FILE) as f: original_code = f.read()
+        try:
+            write_psm_code(original_code, flask_login.current_user.id, action='restore')
+        except PsmEditingDisabled as e:
+            return draw_psm_editing_disabled_page(str(e)), 403
         return flask.redirect(flask.url_for('hardware'))
         
 
@@ -2334,6 +2427,7 @@ def settings():
                     cur.close()
                     conn.close()
                     
+                    psm_editing = 'false'
                     for row in rows:
                         if (row[0] == "Modbus_port"):
                             modbus_port = str(row[1])
@@ -2351,6 +2445,8 @@ def settings():
                             slave_timeout = str(row[1])
                         elif (row[0] == "snap7"):
                             start_snap7 = str(row[1])
+                        elif (row[0] == PSM_EDITING_SETTING):
+                            psm_editing = str(row[1])
                             
                     
                     if (modbus_port == 'disabled'):
@@ -2475,6 +2571,27 @@ def settings():
 
                     return_str += """
                         <br>
+                        <br>
+                        <label class="container">
+                            <b>Allow PSM hardware-layer code editing</b>"""
+
+                    if (psm_editing == 'true'):
+                        return_str += """
+                            <input id="psm_editing" type="checkbox" checked>
+                            <span class="checkmark"></span>
+                        </label>
+                        <input type='hidden' value='true' id='psm_editing_text' name='psm_editing_text'/>"""
+                    else:
+                        return_str += """
+                            <input id="psm_editing" type="checkbox">
+                            <span class="checkmark"></span>
+                        </label>
+                        <input type='hidden' value='false' id='psm_editing_text' name='psm_editing_text'/>"""
+                    return_str += """
+                        <p style="margin-top:0px">Off by default. The Python SubModule (PSM) code on the Hardware page is executed by the runtime; when this is off the code is read-only and any write is refused. Every write made while it is on is recorded in the Psm_audit table.</p>"""
+
+                    return_str += """
+                        <br>
                         <h2>Slave Devices</h2>
                         <label for='slave_polling_period'><b>Polling Period (ms)</b></label>
                         <input type='text' id='slave_polling_period' name='slave_polling_period' value='""" + slave_polling + "'>"
@@ -2505,8 +2622,9 @@ def settings():
             slave_polling = flask.request.form.get('slave_polling_period')
             slave_timeout = flask.request.form.get('slave_timeout')
             device_hostname = flask.request.form.get('device_hostname')
+            psm_editing = flask.request.form.get('psm_editing_text')
 
-            (modbus_port, dnp3_port, enip_port, pstorage_poll, start_run, start_snap7, slave_polling, slave_timeout, device_hostname) = sanitize_input(modbus_port, dnp3_port, enip_port, pstorage_poll, start_run, start_snap7, slave_polling, slave_timeout, device_hostname)
+            (modbus_port, dnp3_port, enip_port, pstorage_poll, start_run, start_snap7, slave_polling, slave_timeout, device_hostname, psm_editing) = sanitize_input(modbus_port, dnp3_port, enip_port, pstorage_poll, start_run, start_snap7, slave_polling, slave_timeout, device_hostname, psm_editing)
 
             # Change hostname if needed
             current_hostname = socket.gethostname()
@@ -2565,6 +2683,14 @@ def settings():
                     
                     cur.execute("UPDATE Settings SET Value = ? WHERE Key = 'Slave_timeout'", (str(slave_timeout),))
                     conn.commit()
+
+                    if (psm_editing == 'true'):
+                        cur.execute("INSERT OR REPLACE INTO Settings (Key, Value) VALUES (?, 'true')", (PSM_EDITING_SETTING,))
+                        conn.commit()
+                        logger.warning("PSM hardware-layer code editing ENABLED by user '%s'", flask_login.current_user.id)
+                    else:
+                        cur.execute("INSERT OR REPLACE INTO Settings (Key, Value) VALUES (?, 'false')", (PSM_EDITING_SETTING,))
+                        conn.commit()
                     
                     cur.close()
                     conn.close()
