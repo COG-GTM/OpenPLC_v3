@@ -27,6 +27,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 #include "ladder.h"
 #include <string.h>
@@ -82,6 +84,22 @@ IEC_UINT mb_holding_regs[MAX_HOLD_REGS];
 
 int MessageLength;
 
+// Source-IP allowlist for Modbus write and debug function codes. Loaded from
+// MB_WRITE_ALLOWLIST_FILE (one IPv4 address or CIDR per line, '#' comments).
+// If the file is absent the allowlist is not enforced and every source may
+// write (legacy behaviour); if it is present only listed sources may write.
+#define MB_WRITE_ALLOWLIST_MAX          64
+
+struct mb_allow_entry
+{
+    uint32_t addr; // network byte order
+    uint32_t mask; // network byte order
+};
+
+static struct mb_allow_entry mb_write_allow[MB_WRITE_ALLOWLIST_MAX];
+static int mb_write_allow_count = 0;
+static bool mb_write_allow_enforced = false;
+
 #include "debug.h"
 
 // Debugger functions
@@ -111,6 +129,138 @@ int word(unsigned char byte1, unsigned char byte2)
     returnValue = (int)(byte1 << 8) | (int)byte2;
 
     return returnValue;
+}
+
+//-----------------------------------------------------------------------------
+// Parse one "a.b.c.d" or "a.b.c.d/n" allowlist entry. Returns true on success.
+//-----------------------------------------------------------------------------
+static bool parseAllowEntry(const char *text, struct mb_allow_entry *entry)
+{
+    char addr_str[INET_ADDRSTRLEN + 1];
+    const char *slash = strchr(text, '/');
+    size_t addr_len = slash ? (size_t)(slash - text) : strlen(text);
+    int prefix = 32;
+
+    if (addr_len == 0 || addr_len > INET_ADDRSTRLEN)
+    {
+        return false;
+    }
+    memcpy(addr_str, text, addr_len);
+    addr_str[addr_len] = '\0';
+
+    if (slash != NULL)
+    {
+        char *end = NULL;
+        long value = strtol(slash + 1, &end, 10);
+        if (end == slash + 1 || *end != '\0' || value < 0 || value > 32)
+        {
+            return false;
+        }
+        prefix = (int)value;
+    }
+
+    struct in_addr addr;
+    if (inet_pton(AF_INET, addr_str, &addr) != 1)
+    {
+        return false;
+    }
+
+    uint32_t mask = (prefix == 0) ? 0 : htonl(0xFFFFFFFFu << (32 - prefix));
+    entry->addr = addr.s_addr & mask;
+    entry->mask = mask;
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+// Load the Modbus write allowlist from `path`. Returns the number of entries
+// loaded, or -1 if the file does not exist (allowlist not enforced).
+//-----------------------------------------------------------------------------
+int loadModbusWriteAllowlist(const char *path)
+{
+    char log_msg[1000];
+    char line[256];
+
+    mb_write_allow_count = 0;
+    mb_write_allow_enforced = false;
+
+    FILE *file = fopen(path, "r");
+    if (file == NULL)
+    {
+        sprintf(log_msg, "Modbus Server: WARNING: %s not found - Modbus write and debug "
+                         "function codes are accepted from ANY source\n", path);
+        openplc_log(log_msg);
+        return -1;
+    }
+
+    int line_no = 0;
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
+        line_no++;
+        char *text = line;
+        char *comment = strchr(text, '#');
+        if (comment != NULL) *comment = '\0';
+        while (*text == ' ' || *text == '\t') text++;
+        size_t len = strlen(text);
+        while (len > 0 && (text[len - 1] == ' ' || text[len - 1] == '\t' ||
+                           text[len - 1] == '\r' || text[len - 1] == '\n'))
+        {
+            text[--len] = '\0';
+        }
+        if (len == 0) continue;
+
+        if (mb_write_allow_count >= MB_WRITE_ALLOWLIST_MAX)
+        {
+            sprintf(log_msg, "Modbus Server: %s:%d ignored - allowlist holds at most %d entries\n",
+                    path, line_no, MB_WRITE_ALLOWLIST_MAX);
+            openplc_log(log_msg);
+            break;
+        }
+        if (!parseAllowEntry(text, &mb_write_allow[mb_write_allow_count]))
+        {
+            sprintf(log_msg, "Modbus Server: %s:%d ignored - invalid address or CIDR\n", path, line_no);
+            openplc_log(log_msg);
+            continue;
+        }
+        mb_write_allow_count++;
+    }
+    fclose(file);
+
+    mb_write_allow_enforced = true;
+    sprintf(log_msg, "Modbus Server: write allowlist loaded from %s (%d entries) - write and debug "
+                     "function codes restricted to listed sources\n", path, mb_write_allow_count);
+    openplc_log(log_msg);
+    return mb_write_allow_count;
+}
+
+//-----------------------------------------------------------------------------
+// True if the given IPv4 peer (network byte order) may issue write and debug
+// function codes.
+//-----------------------------------------------------------------------------
+bool modbusWriteAllowed(uint32_t peer_addr)
+{
+    if (!mb_write_allow_enforced)
+    {
+        return true;
+    }
+    for (int i = 0; i < mb_write_allow_count; i++)
+    {
+        if ((peer_addr & mb_write_allow[i].mask) == mb_write_allow[i].addr)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+//-----------------------------------------------------------------------------
+// Function codes that mutate controller state (writes, force/trace, debugger)
+//-----------------------------------------------------------------------------
+static bool isWriteOrDebugFunction(unsigned char fc)
+{
+    return fc == MB_FC_WRITE_COIL || fc == MB_FC_WRITE_REGISTER ||
+           fc == MB_FC_WRITE_MULTIPLE_COILS || fc == MB_FC_WRITE_MULTIPLE_REGISTERS ||
+           fc == MB_FC_DEBUG_INFO || fc == MB_FC_DEBUG_SET || fc == MB_FC_DEBUG_GET ||
+           fc == MB_FC_DEBUG_GET_LIST || fc == MB_FC_DEBUG_GET_MD5;
 }
 
 //-----------------------------------------------------------------------------
@@ -1102,9 +1252,11 @@ int readModbusMessage(int fd, unsigned char *buffer, size_t bufferSize)
 //-----------------------------------------------------------------------------
 // This function must parse and process the client request and write back the
 // response for it. The return value is the size of the response message in
-// bytes.
+// bytes. `peer_addr` is the IPv4 source address of the request (network byte
+// order); write and debug function codes are only serviced when it passes the
+// write allowlist.
 //-----------------------------------------------------------------------------
-int processModbusMessage(unsigned char *buffer, int bufferSize)
+int processModbusMessage(unsigned char *buffer, int bufferSize, uint32_t peer_addr)
 {
     MessageLength = 0;
     uint16_t field1 = (uint16_t)buffer[8] << 8 | (uint16_t)buffer[9];
@@ -1117,6 +1269,20 @@ int processModbusMessage(unsigned char *buffer, int bufferSize)
     //check if the message is long enough
     if (bufferSize < 8)
     {
+        ModbusError(buffer, ERR_ILLEGAL_FUNCTION);
+    }
+
+    //*********** Write / debug from a source not on the allowlist ***********
+    else if (isWriteOrDebugFunction(buffer[7]) && !modbusWriteAllowed(peer_addr))
+    {
+        char log_msg[1000];
+        char peer_str[INET_ADDRSTRLEN];
+        struct in_addr peer;
+        peer.s_addr = peer_addr;
+        inet_ntop(AF_INET, &peer, peer_str, sizeof(peer_str));
+        sprintf(log_msg, "Modbus Server: rejected function code 0x%02X from %s (not on write allowlist)\n",
+                buffer[7], peer_str);
+        openplc_log(log_msg);
         ModbusError(buffer, ERR_ILLEGAL_FUNCTION);
     }
 

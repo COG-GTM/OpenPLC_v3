@@ -1,0 +1,14 @@
+# Modbus/TCP write allowlist for the OpenPLC runtime.
+#
+# Copy to mbwrite_allow.list (next to core/openplc, i.e. the webserver/
+# directory the runtime is started from) and restart Modbus. While this file
+# is present only the sources listed below may issue Modbus write function
+# codes (FC 5, 6, 15, 16) and the debugger function codes (FC 0x41-0x45);
+# every other source gets exception 0x01 ILLEGAL FUNCTION. Read function codes
+# (FC 1-4) are served to everyone. Without the file all sources may write and
+# a warning is logged when the Modbus server starts.
+#
+# One IPv4 address or CIDR block per line, '#' starts a comment.
+# Talon Kingsport Line 4 (see talon/SECURITY-SWARM.md section 3):
+172.20.4.10          # Ignition gateway (setpoint writes HR1024-1029)
+127.0.0.1            # local OpenPLC Editor / HIL harness
