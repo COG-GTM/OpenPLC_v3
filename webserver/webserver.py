@@ -23,6 +23,7 @@ import flask
 import flask_login
 
 from credentials import CertGen
+from device_hostname import InvalidHostname, apply_device_hostname, read_hostname_settings, write_hostname_settings
 from restapi import app_restapi, restapi_bp, db, register_callback_get, register_callback_post
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -2303,8 +2304,24 @@ def settings():
 
             # Get hostname
             device_hostname = socket.gethostname()
+            os_sync_enabled = False
+            conn = create_connection("openplc.db")
+            if (conn != None):
+                try:
+                    cur = conn.cursor()
+                    (stored_hostname, os_sync_enabled) = read_hostname_settings(cur)
+                    cur.close()
+                    conn.close()
+                    if stored_hostname != None:
+                        device_hostname = stored_hostname
+                except Error as e:
+                    print("error reading hostname settings" + str(e))
 
             if device_hostname != None:
+                device_hostname = escape(device_hostname)
+                for message in flask.get_flashed_messages(category_filter=['hostname']):
+                    return_str += """
+                        <p id='hostname_message' style='color:#1b5e20;background:#e8f5e9;padding:8px'>""" + escape(message) + """</p>"""
                 return_str += """
                         <b>Change Hostname</b>
                         <br>
@@ -2314,6 +2331,14 @@ def settings():
                             <b>Hostname</b>
                         </label>
                         <input type='text' id='device_hostname' name='device_hostname' value='""" + device_hostname + """'>
+                        <br>
+                        <br>
+                        <br>
+                        <label class="container">
+                            <b>Apply hostname to operating system (hostnamectl set-hostname, runs as root)</b>
+                            <input id="hostname_os_sync" name="hostname_os_sync" type="checkbox" value='true'""" + (" checked" if os_sync_enabled else "") + """>
+                            <span class="checkmark"></span>
+                        </label>
                         <br>
                         <br>
                         <br>
@@ -2505,19 +2530,34 @@ def settings():
             slave_polling = flask.request.form.get('slave_polling_period')
             slave_timeout = flask.request.form.get('slave_timeout')
             device_hostname = flask.request.form.get('device_hostname')
+            hostname_os_sync = (flask.request.form.get('hostname_os_sync') == 'true')
 
-            (modbus_port, dnp3_port, enip_port, pstorage_poll, start_run, start_snap7, slave_polling, slave_timeout, device_hostname) = sanitize_input(modbus_port, dnp3_port, enip_port, pstorage_poll, start_run, start_snap7, slave_polling, slave_timeout, device_hostname)
+            (modbus_port, dnp3_port, enip_port, pstorage_poll, start_run, start_snap7, slave_polling, slave_timeout) = sanitize_input(modbus_port, dnp3_port, enip_port, pstorage_poll, start_run, start_snap7, slave_polling, slave_timeout)
 
-            # Change hostname if needed
-            current_hostname = socket.gethostname()
-            if current_hostname != None and current_hostname != device_hostname:
-                subprocess.run(['hostnamectl', 'set-hostname', device_hostname])
+            # Validate the hostname before anything is stored or executed; the OS
+            # rename only happens when the operator has enabled the gate.
+            try:
+                hostname_change = apply_device_hostname(device_hostname, hostname_os_sync)
+            except InvalidHostname as e:
+                return flask.Response(pages.w3_style + pages.settings_style + """
+            <div class="w3-container w3-margin">
+                <h2>Invalid hostname</h2>
+                <p>""" + escape(str(e)) + """</p>
+                <p>Use letters, digits and hyphens only (RFC 1123); labels must not start or end with a hyphen. Nothing was changed.</p>
+                <a href='settings' class='w3-button w3-blue'>Back to Settings</a>
+            </div>
+    </body>
+</html>""", status=400, mimetype='text/html')
+            device_hostname = hostname_change.hostname
 
             database = "openplc.db"
             conn = create_connection(database)
             if (conn != None):
                 try:
                     cur = conn.cursor()
+                    (previous_hostname, previous_os_sync) = read_hostname_settings(cur)
+                    write_hostname_settings(cur, device_hostname, hostname_os_sync)
+                    conn.commit()
                     if (modbus_port == None):
                         cur.execute("UPDATE Settings SET Value = 'disabled' WHERE Key = 'Modbus_port'")
                         conn.commit()
@@ -2570,6 +2610,9 @@ def settings():
                     conn.close()
                     configure_runtime()
                     generate_mbconfig()
+                    if previous_hostname != device_hostname or previous_os_sync != hostname_os_sync or hostname_change.os_changed:
+                        flask.flash(hostname_change.message, 'hostname')
+                        return flask.redirect(flask.url_for('settings'))
                     return flask.redirect(flask.url_for('dashboard'))
                     
                 except Error as e:
