@@ -1,0 +1,94 @@
+// OpenPLC Runtime v3 (COG-GTM fork) + Talon L4-WASH-01 assets.
+// Edit this file, then run ./render.sh to regenerate architecture.png and architecture.svg.
+digraph openplc_architecture {
+  graph [rankdir=TB, fontname="DejaVu Sans", fontsize=18, labelloc=t, nodesep=0.35, ranksep=0.55,
+         label="OpenPLC Runtime v3 (COG-GTM fork) and Talon L4-WASH-01 (PW-430) harness", pad=0.3];
+  node  [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=16, fillcolor=white, color="#555555"];
+  edge  [fontname="DejaVu Sans", fontsize=13, color="#444444"];
+
+  // ---------------- external actors ----------------
+  operator [label="Engineer / operator\n(browser)", shape=oval, fillcolor="#fff2cc"];
+  hmi      [label="SCADA / HMI / MES\n(e.g. Ignition gateway)", shape=oval, fillcolor="#fff2cc"];
+  editor   [label="OpenPLC Editor\n(exports .st)", shape=oval, fillcolor="#fff2cc"];
+
+  // ---------------- build-time toolchain ----------------
+  subgraph cluster_build {
+    label="Build toolchain (install.sh -> background_installer.sh)"; style="rounded,dashed"; color="#7f7f7f";
+    installer [label="install.sh <platform>\nlinux | docker | rpi | win | custom ...\nbuilds utils/*, writes start_openplc.sh"];
+    compile   [label="scripts/compile_program.sh\niec2c (MatIEC) -> glue_generator\n-> g++ core/*.cpp -> core/openplc"];
+    hwsel     [label="scripts/change_hardware_layer.sh\ncopies core/hardware_layers/<driver>.cpp\n-> core/hardware_layer.cpp"];
+  }
+
+  // ---------------- python web tier ----------------
+  subgraph cluster_web {
+    label="webserver/ (Python, .venv)  - started by start_openplc.sh"; style="rounded"; color="#3c78d8"; fillcolor="#eaf1fb"; style="rounded,filled";
+    flask   [label="webserver.py (Flask, flask_login)\nHTTP :8080 - dashboard, programs, modbus,\nmonitoring, hardware, users, settings", fillcolor="#cfe2f3"];
+    rest    [label="restapi.py (Flask + JWT)\nHTTPS :8443 /api/*", fillcolor="#cfe2f3"];
+    ctl     [label="openplc.py runtime class\nstart/stop/compile, RPC client", fillcolor="#cfe2f3"];
+    mon     [label="monitoring.py\npymodbus client, 0.5 s poll", fillcolor="#cfe2f3"];
+    db      [label="openplc.db (SQLite)\nUsers, Programs, Settings, Slave_dev", shape=cylinder, fillcolor="#d9ead3"];
+    stfiles [label="st_files/*.st\nactive_program", shape=folder, fillcolor="#d9ead3"];
+    {rank=same; flask; rest;}
+  }
+
+  // ---------------- C++ runtime ----------------
+  subgraph cluster_core {
+    label="webserver/core/openplc (C++ runtime process)"; color="#cc0000"; fillcolor="#fdecea"; style="rounded,filled";
+    isrv   [label="interactive_server.cpp\nlocalhost :43628\nstart_modbus() / start_enip() / quit() ...", fillcolor="#f4cccc"];
+    scan   [label="main.cpp scan loop (TASK interval, here 50 ms)\nupdateBuffersIn -> config_run__ -> updateBuffersOut\nimage tables %IX %QX %IW %QW %MW (glueVars)", fillcolor="#f4cccc"];
+    prog   [label="Compiled PLC program\nPOUS.c / Res0.c / Config0.c\n+ glueVars.cpp", fillcolor="#f4cccc"];
+    proto  [label="Protocol servers\nModbus/TCP :502 (modbus.cpp)\nEtherNet/IP :44818 (enip.cpp, pccc.cpp)\nDNP3 :20000 (off) / S7 snap7", fillcolor="#f4cccc"];
+    mbm    [label="modbus_master.cpp\npolls slave devices", fillcolor="#f4cccc"];
+    hwl    [label="hardware_layer.cpp\n(blank_linux default, psm, rpi, ...)", fillcolor="#f4cccc"];
+    pstore [label="persistent_storage.cpp\npersistent.file", fillcolor="#f4cccc"];
+  }
+
+  psm [label="core/psm/main.py + psm.py\nPython SubModule (PSM)\npymodbus server localhost :2605", fillcolor="#fce5cd"];
+  field [label="Field I/O / slave devices\n(VFD, remote I/O drop)", shape=box3d, fillcolor="#eeeeee"];
+
+  // ---------------- Talon assets ----------------
+  subgraph cluster_talon {
+    label="talon/L4-WASH-01  (COG-GTM addition, PW-430 washer)"; color="#38761d"; fillcolor="#eef7e9"; style="rounded,filled";
+    st    [label="L4_WASH_01.st\nIEC 61131-3 ST, PackML states\nFB_SCALE_AI, FB_MOTOR", fillcolor="#d9ead3"];
+    docs  [label="docs/: FDS Rev F,\nIO list, alarm list (CSV)", shape=note, fillcolor="#d9ead3"];
+    sil   [label="sil/: Makefile + sil_shim.cpp\n-> build/libl4wash_sil.so\nopenplc_sil.py (ctypes) + pytest", fillcolor="#d9ead3"];
+    hil   [label="hil/plant_model_psm.py\ntank / conveyor / pump model\nfaults: /tmp/pw430_faults.json", fillcolor="#d9ead3"];
+    {rank=same; st; docs; hil;}
+  }
+
+  // ---------------- edges ----------------
+  operator -> flask [label="HTTP 8080"];
+  editor   -> flask [label="upload .st", style=dashed];
+  hmi      -> proto [label="Modbus/TCP 502\nread HR0-7, write HR1024-1029"];
+
+  flask -> db; rest -> db;
+  flask -> stfiles [label="upload"];
+  flask -> ctl;
+  flask -> mon;
+  flask -> hwsel [label="/hardware", style=dashed];
+  ctl -> compile [label="compile", style=dashed];
+  compile -> stfiles [dir=back, style=dashed, label="reads"];
+  compile -> prog [style=dashed, label="builds"];
+  installer -> compile [style=dotted];
+  hwsel -> hwl [style=dashed];
+
+  ctl -> isrv [label="TCP RPC 43628"];
+  isrv -> proto [label="start/stop"];
+  isrv -> pstore;
+  mon -> proto [label="Modbus client"];
+
+  scan -> prog [label="config_run__"];
+  proto -> scan [dir=both, label="image tables"];
+  mbm -> scan [dir=both];
+  hwl -> scan [dir=both];
+  pstore -> scan [dir=both, style=dashed];
+  mbm -> field [dir=both];
+  hwl -> field [dir=both, label="GPIO / drivers"];
+  hwl -> psm [dir=both, label="psm driver:\nModbus 2605"];
+
+  prog -> st [style=invis];
+  stfiles -> st [dir=back, label="Programs -> Upload", style=dashed, color="#38761d"];
+  st -> sil [label="iec2c + glue_generator\n(runtime toolchain)", color="#38761d"];
+  docs -> sil [label="tests named by FDS section", style=dashed, color="#38761d"];
+  psm -> hil [dir=back, label="pasted into Hardware page", style=dashed, color="#38761d"];
+}

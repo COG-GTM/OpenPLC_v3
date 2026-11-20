@@ -8,6 +8,10 @@
 > assets under [`talon/`](talon/README.md): the PW-430 washer program (IEC 61131-3 ST), its
 > FDS / IO list / alarm list, a SIL harness and HIL plant model, and the OT security review
 > scope. The runtime itself is unmodified upstream OpenPLC v3 (GPLv3).
+>
+> Architecture: [documentation/architecture.md](documentation/architecture.md) covers the runtime
+> and the Talon L4-WASH-01 harness, with a Graphviz diagram ([DOT](documentation/diagrams/architecture.dot),
+> [PNG](documentation/diagrams/architecture.png), [SVG](documentation/diagrams/architecture.svg)).
 
 ---
 
