@@ -46,12 +46,17 @@ the shipped database: Modbus `502`, EtherNet/IP `44818`, S7 (snap7) enabled, DNP
 
 The monitoring page (`monitoring.py`) does not use the command socket: it is a `pymodbus`
 client that polls the runtime's own Modbus server every 0.5 s and shows the located variables (`AT %...`)
-parsed from the active `.st` file in `st_files/`.
+parsed from the active `.st` file in `st_files/`. `parse_st()` is a line scanner: it skips any
+declaration line that contains an ST comment and splits on single spaces, so it expects the form
+`NAME AT %QX0.0 : BOOL;`. With `L4_WASH_01.st` (column-aligned, mostly commented declarations)
+only 4 of its 41 located variables (`STACK_RED`, `STACK_AMBER`, `STACK_GREEN`, `HORN`) appear,
+with blank type and location; use the SIL harness or a Modbus client to observe the rest.
 
 ## 3. Program build pipeline
 
 Uploading a `.st` file stores it in `webserver/st_files/` and records it in the `Programs`
-table; the active program name is kept in `webserver/active_program`. Compiling runs
+table; the active program name is kept in `webserver/active_program`, which must name a file that
+also has a `Programs` row (upload through the UI rather than compiling from the CLI alone). Compiling runs
 `webserver/scripts/compile_program.sh <file>.st`:
 
 1. `iec2c` (MatIEC) translates the ST file to C (`POUS.c`, `Res0.c`, `Config0.c`,
