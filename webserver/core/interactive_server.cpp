@@ -34,6 +34,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <stdint.h>
 #include <time.h>
 
 #include "ladder.h"
@@ -53,8 +54,9 @@ bool run_enip = 0;
 uint16_t enip_port = 44818;
 bool run_pstorage = 0;
 uint16_t pstorage_polling = 10;
-unsigned char server_command[1024];
-int command_index = 0;
+//per connection thread: a new client can now be served before the previous worker has reset its parser
+__thread unsigned char server_command[1024];
+__thread int command_index = 0;
 bool processing_command = 0;
 time_t start_time;
 time_t end_time;
@@ -522,7 +524,7 @@ void processMessage_interactive(unsigned char *buffer, int bufferSize, int clien
 //-----------------------------------------------------------------------------
 void *handleConnections_interactive(void *arguments)
 {
-    int client_fd = *(int *)arguments;
+    int client_fd = (int)(intptr_t)arguments;
     unsigned char buffer[1024];
     int messageSize;
 
@@ -578,13 +580,12 @@ void startInteractiveServer(int port)
 
         else
         {
-            int arguments[1];
             pthread_t thread;
             int ret = -1;
 
             printf("Interactive Server: Client accepted! Creating thread for the new client ID: %d...\n", client_fd);
-            arguments[0] = client_fd;
-            ret = pthread_create(&thread, NULL, handleConnections_interactive, arguments);
+            //pass the descriptor by value: the next accept may run before this thread starts
+            ret = pthread_create(&thread, NULL, handleConnections_interactive, (void *)(intptr_t)client_fd);
             if (ret==0)
             {
                 pthread_detach(thread);
