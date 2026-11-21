@@ -13,6 +13,7 @@ debug_vars = []
 monitor_active = False
 mb_client = None
 monitor_generation = 0
+monitor_state_lock = threading.Lock()
 
 def parse_st(st_file):
     global debug_vars
@@ -51,6 +52,10 @@ def modbus_monitor(generation, client):
     if (monitor_active != True or generation != monitor_generation):
         return
     poll_modbus(client)
+    if (monitor_active != True or generation != monitor_generation):
+        #the session was stopped while this poll ran: drop its (possibly reconnected) client and do not reschedule
+        client.close()
+        return
     threading.Timer(0.5, modbus_monitor, args=(generation, client)).start()
 
 def poll_modbus(client):
@@ -144,17 +149,23 @@ def start_monitor(modbus_port_cfg):
     global mb_client
     global monitor_generation
     
-    if (monitor_active != True):
+    #only the state flip is serialized; the first poll runs outside the lock
+    with monitor_state_lock:
+        if (monitor_active == True):
+            return
         monitor_active = True
         monitor_generation += 1
-        mb_client = ModbusTcpClient('127.0.0.1', port=modbus_port_cfg)
-        
-        modbus_monitor(monitor_generation, mb_client)
+        generation = monitor_generation
+        client = ModbusTcpClient('127.0.0.1', port=modbus_port_cfg)
+        mb_client = client
+    
+    modbus_monitor(generation, client)
 
 def stop_monitor():
     global monitor_active
     global mb_client
     
-    if (monitor_active != False):
-        monitor_active = False
-        mb_client.close()
+    with monitor_state_lock:
+        if (monitor_active != False):
+            monitor_active = False
+            mb_client.close()
