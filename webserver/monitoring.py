@@ -12,7 +12,6 @@ class debug_var():
 debug_vars = []
 monitor_active = False
 mb_client = None
-monitor_lock = threading.RLock()
 monitor_generation = 0
 
 def parse_st(st_file):
@@ -47,55 +46,52 @@ def parse_st(st_file):
 def cleanup():
     del debug_vars[:]
     
-def modbus_monitor(generation=None):
-    with monitor_lock:
-        #a poll timer left over from a monitor session that was stopped (and maybe restarted) must not run
-        if generation is not None and generation != monitor_generation:
-            return
-        poll_modbus()
-        if (monitor_active == True):
-            threading.Timer(0.5, modbus_monitor, args=(monitor_generation,)).start()
+def modbus_monitor(generation, client):
+    #a poll timer left over from a stopped (and maybe restarted) monitor session must not poll
+    if (monitor_active != True or generation != monitor_generation):
+        return
+    poll_modbus(client)
+    threading.Timer(0.5, modbus_monitor, args=(generation, client)).start()
 
-def poll_modbus():
-    global mb_client
+def poll_modbus(client):
     for debug_data in debug_vars:
         if (debug_data.location.find('IX')) > 0:
             #Reading Input Status
             mb_address = debug_data.location.split('%IX')[1].split('.')
-            result = mb_client.read_discrete_inputs(int(mb_address[0])*8 + int(mb_address[1]), 1)
+            result = client.read_discrete_inputs(int(mb_address[0])*8 + int(mb_address[1]), 1)
             debug_data.value = result.bits[0]
             
         elif (debug_data.location.find('QX')) > 0:
             #Reading Coils
             mb_address = debug_data.location.split('%QX')[1].split('.')
             if (len(mb_address) < 2):
-                result = mb_client.read_coils(int(mb_address[0])*8, 1)
+                result = client.read_coils(int(mb_address[0])*8, 1)
             else:
-                result = mb_client.read_coils(int(mb_address[0])*8 + int(mb_address[1]), 1)
+                result = client.read_coils(int(mb_address[0])*8 + int(mb_address[1]), 1)
             debug_data.value = result.bits[0]
             
         elif (debug_data.location.find('IW')) > 0:
             #Reading Input Registers
             mb_address = debug_data.location.split('%IW')[1]
-            result = mb_client.read_input_registers(int(mb_address), 1)
+            result = client.read_input_registers(int(mb_address), 1)
             debug_data.value = result.registers[0]
             
         elif (debug_data.location.find('QW')) > 0:
             #Reading Holding Registers
             mb_address = debug_data.location.split('%QW')[1]
-            result = mb_client.read_holding_registers(int(mb_address), 1)
+            result = client.read_holding_registers(int(mb_address), 1)
             debug_data.value = result.registers[0]
             
         elif (debug_data.location.find('MW')) > 0:
             #Reading Word Memory
             mb_address = debug_data.location.split('%MW')[1]
-            result = mb_client.read_holding_registers(int(mb_address) + 1024, 1)
+            result = client.read_holding_registers(int(mb_address) + 1024, 1)
             debug_data.value = result.registers[0]
             
         elif (debug_data.location.find('MD')) > 0:
             #Reading Double Memory
             mb_address = debug_data.location.split('%MD')[1]
-            result = mb_client.read_holding_registers((int(mb_address)*2) + 2048, 2)
+            result = client.read_holding_registers((int(mb_address)*2) + 2048, 2)
             if (debug_data.type == 'SINT') or (debug_data.type == 'INT') or (debug_data.type == 'DINT'):
                 #signed integer
                 float_pack = pack('>HH', result.registers[0], result.registers[1])
@@ -114,7 +110,7 @@ def poll_modbus():
         elif (debug_data.location.find('ML')) > 0:
             #Reading Long Memory
             mb_address = debug_data.location.split('%ML')[1]
-            result = mb_client.read_holding_registers((int(mb_address)*4) + 4096, 4)
+            result = client.read_holding_registers((int(mb_address)*4) + 4096, 4)
             if (debug_data.type == 'SINT') or (debug_data.type == 'INT') or (debug_data.type == 'DINT') or (debug_data.type == 'LINT'):
                 #signed integer
                 float_pack = pack('>HHHH', result.registers[0], result.registers[1], result.registers[2], result.registers[3])
@@ -146,22 +142,19 @@ def write_value(point_address, point_value):
 def start_monitor(modbus_port_cfg):
     global monitor_active
     global mb_client
-    
     global monitor_generation
-
-    with monitor_lock:
-        if (monitor_active != True):
-            monitor_active = True
-            monitor_generation += 1
-            mb_client = ModbusTcpClient('127.0.0.1', port=modbus_port_cfg)
-
-            modbus_monitor(monitor_generation)
+    
+    if (monitor_active != True):
+        monitor_active = True
+        monitor_generation += 1
+        mb_client = ModbusTcpClient('127.0.0.1', port=modbus_port_cfg)
+        
+        modbus_monitor(monitor_generation, mb_client)
 
 def stop_monitor():
     global monitor_active
     global mb_client
     
-    with monitor_lock:
-        if (monitor_active != False):
-            monitor_active = False
-            mb_client.close()
+    if (monitor_active != False):
+        monitor_active = False
+        mb_client.close()

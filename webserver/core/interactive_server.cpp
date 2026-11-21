@@ -217,6 +217,12 @@ int waitForClient_interactive(int socket_fd)
             SetSocketBlockingEnabled(client_fd, true);
             break;
         }
+        if (errno != EAGAIN && errno != EWOULDBLOCK)
+        {
+            //accept failed for another reason (e.g. EMFILE): back off instead of spinning on a readable listener
+            sleepms(100);
+            continue;
+        }
         //wake up as soon as a client connects, still rechecking run_openplc at least every 100ms
         struct pollfd listen_poll = {socket_fd, POLLIN, 0};
         poll(&listen_poll, 1, 100);
