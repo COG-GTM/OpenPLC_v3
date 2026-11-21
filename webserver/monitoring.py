@@ -51,10 +51,14 @@ def modbus_monitor(generation, client):
     #a poll timer left over from a stopped (and maybe restarted) monitor session must not poll
     if (monitor_active != True or generation != monitor_generation):
         return
-    poll_modbus(client)
-    if (monitor_active != True or generation != monitor_generation):
+    try:
+        poll_modbus(client)
+    finally:
         #the session was stopped while this poll ran: drop its (possibly reconnected) client and do not reschedule
-        client.close()
+        stale = (monitor_active != True or generation != monitor_generation)
+        if stale:
+            client.close()
+    if stale:
         return
     threading.Timer(0.5, modbus_monitor, args=(generation, client)).start()
 
