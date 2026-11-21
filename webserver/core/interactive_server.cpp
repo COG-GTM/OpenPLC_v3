@@ -33,6 +33,7 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <time.h>
 
 #include "ladder.h"
@@ -216,7 +217,9 @@ int waitForClient_interactive(int socket_fd)
             SetSocketBlockingEnabled(client_fd, true);
             break;
         }
-        sleepms(100);
+        //wake up as soon as a client connects, still rechecking run_openplc at least every 100ms
+        struct pollfd listen_poll = {socket_fd, POLLIN, 0};
+        poll(&listen_poll, 1, 100);
     }
 
     return client_fd;

@@ -12,6 +12,8 @@ class debug_var():
 debug_vars = []
 monitor_active = False
 mb_client = None
+monitor_lock = threading.RLock()
+monitor_generation = 0
 
 def parse_st(st_file):
     global debug_vars
@@ -45,7 +47,16 @@ def parse_st(st_file):
 def cleanup():
     del debug_vars[:]
     
-def modbus_monitor():
+def modbus_monitor(generation=None):
+    with monitor_lock:
+        #a poll timer left over from a monitor session that was stopped (and maybe restarted) must not run
+        if generation is not None and generation != monitor_generation:
+            return
+        poll_modbus()
+        if (monitor_active == True):
+            threading.Timer(0.5, modbus_monitor, args=(monitor_generation,)).start()
+
+def poll_modbus():
     global mb_client
     for debug_data in debug_vars:
         if (debug_data.location.find('IX')) > 0:
@@ -119,9 +130,7 @@ def modbus_monitor():
                 float_pack = pack('>HHHH', result.registers[0], result.registers[1], result.registers[2], result.registers[3])
                 debug_data.value = unpack('>d', float_pack)[0]
             
-    
-    if (monitor_active == True):
-        threading.Timer(0.5, modbus_monitor).start()
+
 
 def write_value(point_address, point_value):
     global mb_client
@@ -138,16 +147,21 @@ def start_monitor(modbus_port_cfg):
     global monitor_active
     global mb_client
     
-    if (monitor_active != True):
-        monitor_active = True
-        mb_client = ModbusTcpClient('127.0.0.1', port=modbus_port_cfg)
-        
-        modbus_monitor()
+    global monitor_generation
+
+    with monitor_lock:
+        if (monitor_active != True):
+            monitor_active = True
+            monitor_generation += 1
+            mb_client = ModbusTcpClient('127.0.0.1', port=modbus_port_cfg)
+
+            modbus_monitor(monitor_generation)
 
 def stop_monitor():
     global monitor_active
     global mb_client
     
-    if (monitor_active != False):
-        monitor_active = False
-        mb_client.close()
+    with monitor_lock:
+        if (monitor_active != False):
+            monitor_active = False
+            mb_client.close()
