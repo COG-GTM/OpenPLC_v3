@@ -33,6 +33,8 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <stdint.h>
 #include <time.h>
 
 #include "ladder.h"
@@ -52,8 +54,9 @@ bool run_enip = 0;
 uint16_t enip_port = 44818;
 bool run_pstorage = 0;
 uint16_t pstorage_polling = 10;
-unsigned char server_command[1024];
-int command_index = 0;
+//per connection thread: a new client can now be served before the previous worker has reset its parser
+__thread unsigned char server_command[1024];
+__thread int command_index = 0;
 bool processing_command = 0;
 time_t start_time;
 time_t end_time;
@@ -216,7 +219,15 @@ int waitForClient_interactive(int socket_fd)
             SetSocketBlockingEnabled(client_fd, true);
             break;
         }
-        sleepms(100);
+        if (errno != EAGAIN && errno != EWOULDBLOCK)
+        {
+            //accept failed for another reason (e.g. EMFILE): back off instead of spinning on a readable listener
+            sleepms(100);
+            continue;
+        }
+        //wake up as soon as a client connects, still rechecking run_openplc at least every 100ms
+        struct pollfd listen_poll = {socket_fd, POLLIN, 0};
+        poll(&listen_poll, 1, 100);
     }
 
     return client_fd;
@@ -513,7 +524,7 @@ void processMessage_interactive(unsigned char *buffer, int bufferSize, int clien
 //-----------------------------------------------------------------------------
 void *handleConnections_interactive(void *arguments)
 {
-    int client_fd = *(int *)arguments;
+    int client_fd = (int)(intptr_t)arguments;
     unsigned char buffer[1024];
     int messageSize;
 
@@ -569,13 +580,12 @@ void startInteractiveServer(int port)
 
         else
         {
-            int arguments[1];
             pthread_t thread;
             int ret = -1;
 
             printf("Interactive Server: Client accepted! Creating thread for the new client ID: %d...\n", client_fd);
-            arguments[0] = client_fd;
-            ret = pthread_create(&thread, NULL, handleConnections_interactive, arguments);
+            //pass the descriptor by value: the next accept may run before this thread starts
+            ret = pthread_create(&thread, NULL, handleConnections_interactive, (void *)(intptr_t)client_fd);
             if (ret==0)
             {
                 pthread_detach(thread);
