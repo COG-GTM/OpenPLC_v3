@@ -48,9 +48,15 @@ On `linux`, `rpi` and `custom`, the installer registers an `openplc` systemd ser
 sudo ./start_openplc.sh
 ```
 
-`sudo` is needed because the Modbus server listens on port 502. On `win` (Cygwin), run `./start_openplc.sh` without `sudo`. Open http://localhost:8080 and sign in with the default user `openplc`, password `openplc`. The web UI (port 8080) and the REST API (HTTPS port 8443) listen on all network interfaces, so change the password under Users right after the first sign-in, before the host is reachable from other machines. The REST API keeps its own accounts and lets anyone create the first one, so also create that first account (`POST /api/create-user` on port 8443) or block port 8443 before exposing the host. The runtime starts in the Stopped state: click Start PLC on the Dashboard to run the loaded program, or enable "Start OpenPLC in RUN mode" under Settings to have it start on boot.
+`sudo` is needed because the Modbus server listens on port 502. On `win` (Cygwin), run `./start_openplc.sh` without `sudo`. Open http://localhost:8080 and sign in with the default user `openplc`, password `openplc`. The web UI (port 8080) and the REST API (HTTPS port 8443) listen on all network interfaces, so change the password under Users right after the first sign-in, before the host is reachable from other machines. The REST API keeps its own accounts and lets anyone create the first one, so also create that first account or block port 8443 before exposing the host:
 
-The `custom` platform skips package installation, so the `openssl` command must already be installed (the REST API uses it to create its TLS certificate). It also skips Python setup, but both start options run `.venv/bin/python3`. Before starting, create the virtualenv yourself:
+```bash
+curl -k -X POST https://localhost:8443/api/create-user -H 'Content-Type: application/json' -d '{"username": "<user>", "password": "<password>"}'
+```
+
+The runtime starts in the Stopped state: click Start PLC on the Dashboard to run the loaded program, or enable "Start OpenPLC in RUN mode" under Settings to have it start on boot.
+
+The `custom` platform skips package installation, so the `openssl` command must already be installed (the REST API uses it to create its TLS certificate). It also needs Python 3.10 or newer, and it skips Python setup, but both start options run `.venv/bin/python3`. Before starting, create the virtualenv yourself:
 
 ```bash
 python3 -m venv .venv
