@@ -27,7 +27,7 @@ cd OpenPLC_v3
 ./install.sh [platform]
 ```
 
-The install builds the toolchain and runtime from source and takes about 15 minutes. It needs `git` and `sudo` (it calls `sudo apt-get`, `dnf`/`yum`, or `zypper` itself).
+The install builds the toolchain and runtime from source and takes about 15 minutes. It needs `git` and `sudo` (it calls `sudo apt-get`, `yum` or `zypper` itself; on Fedora-based hosts the `yum` command must exist, a `dnf`-only host is rejected as unsupported).
 
 Where `[platform]` can be:
 
@@ -42,13 +42,20 @@ Where `[platform]` can be:
 `custom` - Skip all specific package installation and tries to install OpenPLC assuming your system already has all dependencies met. This option can be useful if you're trying to install OpenPLC on an unsuported Linux platform or had manually installed all the dependency packages before.
 
 ### Running
-On `linux`, `rpi` and `custom`, the installer registers an `openplc` systemd service that starts on boot. To start it right away, run `sudo systemctl start openplc`, or run the runtime in the foreground:
+On `linux`, `rpi` and `custom`, the installer registers an `openplc` systemd service that starts on boot. On a systemd host, run `sudo systemctl start openplc` to start it right away. On any host (including ones without systemd, where the service step fails but the install still finishes) you can run the runtime in the foreground:
 
 ```bash
 sudo ./start_openplc.sh
 ```
 
-`sudo` is needed because the Modbus server listens on port 502. Open http://localhost:8080 and sign in with the default user `openplc`, password `openplc`. Change the password under Users after the first sign-in. The REST API listens on HTTPS port 8443.
+`sudo` is needed because the Modbus server listens on port 502. Open http://localhost:8080 and sign in with the default user `openplc`, password `openplc`. The web UI (port 8080) and the REST API (HTTPS port 8443) listen on all network interfaces, so change the password under Users right after the first sign-in, before the host is reachable from other machines. The runtime starts in the Stopped state: click Start PLC on the Dashboard to run the loaded program, or enable "Start OpenPLC in RUN mode" under Settings to have it start on boot.
+
+The `custom` platform skips Python setup, but both start options run `.venv/bin/python3`. Before starting, create the virtualenv yourself:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python3 -m pip install flask==2.3.3 werkzeug==2.3.7 flask-login==0.6.2 pyserial pymodbus==2.5.3 flask_jwt_extended flask_sqlalchemy python-dotenv
+```
 
 ### Building, Installing and Running inside Docker
 When using Ubuntu: make sure [`docker for Ubuntu` is installed](https://docs.docker.com/install/linux/docker-ce/ubuntu/)
@@ -68,7 +75,7 @@ _Devices can be passed to the `docker` daemon using the `-v` flag (e.g. `-v /dev
 docker run -it --rm --privileged -p 8080:8080 openplc:v3
 ```
 
-Then open http://localhost:8080 and sign in with `openplc` / `openplc`. To keep programs and settings between runs, add `-v openplc-data:/docker_persistent`.
+Then open http://localhost:8080, sign in with `openplc` / `openplc` and click Start PLC (see [Running](#running) about changing the password). To keep the web UI database (users, settings, program list) and uploaded `.st` files between runs, add `-v openplc-data:/docker_persistent`. Two things are not kept in the volume. First, the compiled program: a new container runs the image's blank program until you open the program under Programs and click Launch program to recompile it. Second, the REST API's accounts and secrets (`restapi.db` and `.env`), which start fresh in each new container.
 
 ### EtherCAT capability
 To build with EtherCAT capability try `./install.sh linux ethercat` for more information see `utils/ethercat_src`
