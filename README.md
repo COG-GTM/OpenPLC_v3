@@ -22,10 +22,12 @@ The OpenPLC Project consists of two sub-projects:
 
 ## Installation:
 ```bash
-git clone https://github.com/thiagoralves/OpenPLC_v3.git
+git clone https://github.com/COG-GTM/OpenPLC_v3.git
 cd OpenPLC_v3
 ./install.sh [platform]
 ```
+
+The install builds the toolchain and runtime from source and takes about 15 minutes. It needs `git` and `sudo` (it calls `sudo apt-get`, `dnf`/`yum`, or `zypper` itself).
 
 Where `[platform]` can be:
 
@@ -38,6 +40,15 @@ Where `[platform]` can be:
 `rpi` - Install OpenPLC on a Raspberry Pi
 
 `custom` - Skip all specific package installation and tries to install OpenPLC assuming your system already has all dependencies met. This option can be useful if you're trying to install OpenPLC on an unsuported Linux platform or had manually installed all the dependency packages before.
+
+### Running
+On `linux`, `rpi` and `custom`, the installer registers an `openplc` systemd service that starts on boot. To start it right away, run `sudo systemctl start openplc`, or run the runtime in the foreground:
+
+```bash
+sudo ./start_openplc.sh
+```
+
+`sudo` is needed because the Modbus server listens on port 502. Open http://localhost:8080 and sign in with the default user `openplc`, password `openplc`. Change the password under Users after the first sign-in. The REST API listens on HTTPS port 8443.
 
 ### Building, Installing and Running inside Docker
 When using Ubuntu: make sure [`docker for Ubuntu` is installed](https://docs.docker.com/install/linux/docker-ce/ubuntu/)
@@ -56,6 +67,8 @@ _Devices can be passed to the `docker` daemon using the `-v` flag (e.g. `-v /dev
 ```bash
 docker run -it --rm --privileged -p 8080:8080 openplc:v3
 ```
+
+Then open http://localhost:8080 and sign in with `openplc` / `openplc`. To keep programs and settings between runs, add `-v openplc-data:/docker_persistent`.
 
 ### EtherCAT capability
 To build with EtherCAT capability try `./install.sh linux ethercat` for more information see `utils/ethercat_src`
